@@ -1,0 +1,18 @@
+{
+  // Compilacion para el servidor.
+  //
+  // En el ordenador de casa todo corre con `tsx`, que lee TypeScript
+  // directamente. En el servidor no puede: `tsx` es una dependencia de
+  // desarrollo y una instalacion de produccion no la trae. Asi que lo que se
+  // sube es JavaScript ya compilado, que arranca con `node` a secas.
+  //
+  // Solo se compila lo que el panel necesita. Los guiones de verificacion usan
+  // PGlite, que tampoco estara en el servidor, y no pintan nada ahi.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts", "scripts/review.ts"]
+}

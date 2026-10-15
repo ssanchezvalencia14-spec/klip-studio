@@ -1,0 +1,40 @@
+# Secretos. El repositorio padre tiene remoto publico.
+.env
+.env.local
+.env.*.local
+
+# Artefactos pesados
+models/
+work/
+out/
+
+# Registros de las tareas programadas. Llevan rutas y nombres de cuenta, y el
+# repositorio padre tiene remoto publico.
+logs/
+
+# Dependencias y build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Estado local (sustituido por Supabase en la Fase 4)
+state/
+
+# Material de origen archivado. Son gigabytes de VOD, no codigo.
+archivo/
+
+# Paquete que genera `npm run desplegar`. Se reconstruye en cada despliegue.
+klip-deploy.zip
+
+# Grafo de graphify: se regenera con `graphify update .` y pesa dos megas.
+graphify-out/
+
+# Configuracion local del agente y restos de sesiones.
+.claude/settings.local.json
+.claude-flow/
+tmp-mon.ts

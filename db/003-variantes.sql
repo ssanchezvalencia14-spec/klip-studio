@@ -1,0 +1,11 @@
+-- Cuantas copias por cuenta se han generado de cada video.
+--
+-- El resto de cifras del panel se deducen de otras tablas: los momentos se
+-- cuentan en `clips`, y los renderizados son los clips que ya tienen archivo.
+-- Las copias no: viven como ficheros en el ordenador del trabajador y no hay
+-- ninguna tabla que las represente.
+--
+-- Antes el panel las contaba leyendo el directorio de salida. Con el panel en
+-- un servidor que no tiene esos ficheros, alguien tiene que decirselo, y ese
+-- alguien es el trabajador cuando termina de generarlas.
+alter table sources add column if not exists variants_count integer not null default 0;

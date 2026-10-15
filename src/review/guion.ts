@@ -1,0 +1,5102 @@
+/**
+ * El guion del panel: estado, peticiones, pintado y eventos.
+ *
+ * Se sirve tal cual dentro de una etiqueta script. No se compila ni se empaqueta
+ * -- el navegador lo recibe como esta escrito aqui -- asi que el typecheck NO lo
+ * mira: para TypeScript esto es una cadena. Lo que si lo mira es `verify:panel`,
+ * que lo compila con `new Function` sin ejecutarlo y falla en la linea exacta.
+ *
+ * Salio de page.ts por el mismo motivo que el CSS, explicado en estilos.ts.
+ */
+import { espiral } from './marca.js'
+
+export const GUION = `/*
+ * Cuatro secciones, no nueve.
+ *
+ * El menu llego a tener nueve entradas y era imposible saber donde mirar:
+ * "Ajustes" y "Horarios" eran los dos ajustes, "Proyectos" y "Cuentas" eran los
+ * dos cuentas, y "Programacion", "Historial" y "Resultados" eran tres sitios
+ * distintos para la misma pregunta de "que ha pasado".
+ *
+ * Las vistas de dentro NO se tocaron: cada una sigue siendo la que era. Lo que
+ * cambia es como se llega a ellas. Agrupar es reversible y no arriesga nada;
+ * reescribir nueve pantallas por un problema de navegacion, si.
+ *
+ * El orden es el del dia a dia: subir un video, revisarlo, ver cuando sale.
+ * Todo lo que se toca una vez y no se vuelve a mirar vive en Ajustes.
+ */
+const SECCIONES = {
+  inicio:  { titulo: 'Inicio',   vistas: [['proceso', 'Inicio']] },
+  revisar: { titulo: 'Revisar',  vistas: [['clips', 'Revisar']] },
+  agenda:  { titulo: 'Agenda',   vistas: [['cola', 'Calendario'], ['metricas', 'Resultados']] },
+  config:  { titulo: 'Ajustes',  vistas: [
+    ['proyectos', 'Clientes'],
+    ['plataformas', 'Cuentas'],
+    ['flujo', 'Horarios'],
+    ['ajustes', 'Marca y textos'],
+    ['registro', 'Historial'],
+  ] },
+};
+
+/**
+ * Que es cada pantalla, en una linea.
+ *
+ * Se escribe para alguien que entra por primera vez y no monto el programa.
+ * Por eso no se usan las palabras de dentro ("cola", "variantes", "fuente"):
+ * se dice que vera y que puede hacer alli.
+ */
+const INTROS = {
+  proceso: 'Desde aqui se añaden videos y se ve en que punto va cada uno. Lo demas lo hace el programa solo.',
+  clips: 'Los momentos que el programa ha encontrado. Aprueba los que valgan y descarta el resto: es la unica decision que no toma el programa.',
+  cola: 'Lo que va a salir, con su dia y su hora. No hay que lanzarlo: se publica solo.',
+  metricas: 'Como le va a lo ya publicado.',
+  proyectos: 'Cada cliente con sus cuentas, sus campañas y su ritmo de publicacion.',
+  plataformas: 'Las cuentas donde se publica y en que estado esta cada una.',
+  flujo: 'A que hora y con que frecuencia sale cada video.',
+  ajustes: 'Como se cortan los videos, como se ven los subtitulos y que texto los acompaña.',
+  registro: 'Todo lo que ha hecho el programa, lo que tardo y lo que costo.',
+};
+
+/** De que seccion es cada vista. Se deriva del mapa para no repetirlo. */
+const SECCION_DE = Object.fromEntries(
+  Object.entries(SECCIONES).flatMap(([id, s]) => s.vistas.map(([v]) => [v, id])),
+);
+
+/*
+ * El detalle de un VOD no es una entrada del menu: es una profundidad mas.
+ *
+ * Cuelga de Inicio, que es donde estan los videos, pero NO aparece como
+ * pestaña. Si estuviera en SECCIONES saldria en la barra de la seccion y
+ * habria una pestaña que no lleva a ningun sitio mientras no haya un VOD
+ * elegido. Aqui se dice a mano de quien depende, y el rastro de migas de arriba
+ * se encarga del camino de vuelta.
+ */
+SECCION_DE.vod = 'inicio';
+
+const state = {
+  view: 'proceso',
+  filter: 'pending',
+  counts: {},
+  clips: [],
+  overview: null,
+  metrics: null,
+  settings: null,
+  ajustes: null,
+  plataformas: null,
+  proyectos: null,
+  campanaElegida: localStorage.getItem('klip:campana') ?? '',
+  /** Donde estabas en cada seccion, para volver ahi. */
+  ultimaVista: {},
+  runs: null,
+  queue: null,
+  jobs: [],
+  openLog: null,
+  /** Buscador y filtros de la lista de cuentas. */
+  filtroCuentas: { texto: '', estado: '', cliente: '' },
+  /** Cuentas marcadas para una accion en lote. */
+  selCuentas: new Set(),
+  /** El ajuste que el buscador pidio resaltar, hasta que se pinte. */
+  resaltar: null,
+  /** Los clips marcados para decidir en lote. Llave: fuente + clip. */
+  sel: new Set(),
+  /** Indice de la tarjeta en foco dentro de la rejilla de Revisar. */
+  foco: 0,
+  /** Si el resaltado de foco se esta usando. Se apaga al tocar con el raton. */
+  conTeclado: false,
+  /** El VOD abierto en detalle, con sus clips colocados en el tiempo. */
+  vod: null,
+  /** Su identificador, que se conserva mientras carga para no parpadear. */
+  vodId: null,
+  /*
+   * Avisos.
+   *
+   * No hay tabla de notificaciones ni la va a haber: un aviso ES un trabajo que
+   * termino, y esos ya estan en la base. Inventar una tabla paralela seria
+   * mantener dos versiones de la misma verdad y esperar a que se separen.
+   *
+   * Lo unico que no sabe el servidor es que has mirado ya, y eso es de este
+   * aparato, no de la cuenta: haber visto el aviso en el movil no significa
+   * haberlo visto en el portatil. Por eso va en localStorage.
+   */
+  vistos: localStorage.getItem('klip:vistos') ?? '',
+  avisos: false,
+};
+
+/*
+ * Como se desplaza la pagina, segun lo que haya pedido el usuario.
+ *
+ * La regla CSS de movimiento reducido pone scroll-behavior:auto en todo, pero
+ * eso NO alcanza a scrollIntoView({behavior:'smooth'}): la opcion del metodo
+ * pesa mas que la propiedad, asi que el desplazamiento animado seguia pasando
+ * justo para quien habia pedido que no pasara.
+ *
+ * Se consulta en cada llamada y no una vez al cargar: la preferencia se puede
+ * cambiar con la pagina abierta.
+ */
+function comoDesplazar() {
+  return matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function fmt(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+/**
+ * Concordancia de numero.
+ *
+ * "1 clips aprobados" se lee como un error de programa y resta confianza en
+ * todo lo demas que diga el panel.
+ */
+function plural(n, singular, pluralForma) {
+  return n + ' ' + (n === 1 ? singular : (pluralForma ?? singular + 's'));
+}
+
+function hora(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+/**
+ * Cuanto hace, en cristiano.
+ *
+ * Una hora exacta obliga a restar mentalmente. En una lista de avisos lo que se
+ * quiere saber es si es de hace un momento o de ayer, y a partir del dia la
+ * hora exacta ya no dice nada util, asi que se pasa a la fecha.
+ */
+/** Minutos transcurridos desde un instante ISO. */
+function minutosDesde(iso) {
+  if (!iso) return 0;
+  return (Date.now() - new Date(iso).getTime()) / 60000;
+}
+
+function hace(iso) {
+  if (!iso) return '';
+  const seg = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (seg < 90) return 'hace un momento';
+  const min = Math.round(seg / 60);
+  if (min < 60) return 'hace ' + plural(min, 'minuto');
+  const h = Math.round(min / 60);
+  if (h < 24) return 'hace ' + plural(h, 'hora');
+  const d = Math.round(h / 24);
+  if (d < 7) return 'hace ' + plural(d, 'dia');
+  return new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+}
+
+/** Un trabajo esta vivo mientras no haya terminado de una forma u otra. */
+function vivo(job) {
+  return job && (job.status === 'running' || job.status === 'queued');
+}
+
+// --- Avisos ---------------------------------------------------------------
+
+/*
+ * A donde lleva cada trabajo cuando termina.
+ *
+ * El aviso no sirve de nada si al pulsarlo te deja donde estabas. Lo util de
+ * "los videos ya estan" es ir a verlos.
+ */
+const DESTINO = {
+  ingest: 'proceso',
+  select: 'clips',
+  render: 'clips',
+  variants: 'proceso',
+  schedule: 'cola',
+  publish: 'cola',
+  metrics: 'metricas',
+  accounts: 'proceso',
+  doctor: 'registro',
+};
+
+/** Lo que de verdad le importa a quien lo lee, no el nombre interno del paso. */
+const PASO = {
+  ingest: 'Ya esta transcrito',
+  select: 'Momentos encontrados',
+  render: 'Videos creados',
+  variants: 'Copias por cuenta hechas',
+  schedule: 'Reparto rehecho',
+  publish: 'Envio terminado',
+  metrics: 'Numeros actualizados',
+  accounts: 'Cuentas revisadas',
+  doctor: 'Revision terminada',
+};
+
+/**
+ * Los trabajos terminados, del mas reciente al mas antiguo.
+ *
+ * Cancelados fuera: cancelar ya es una accion tuya y el panel se actualizo
+ * delante de ti. Avisarte de algo que acabas de hacer es ruido.
+ */
+function listaAvisos() {
+  return state.jobs
+    .filter(j => j.status === 'ok' || j.status === 'error')
+    .sort((a, b) => String(b.endedAt ?? '').localeCompare(String(a.endedAt ?? '')))
+    .slice(0, 8);
+}
+
+/** Cuantos hay posteriores a la ultima vez que se abrio la campana. */
+function sinVer() {
+  return listaAvisos().filter(j => String(j.endedAt ?? '') > state.vistos).length;
+}
+
+function pintarAvisos() {
+  const lista = listaAvisos();
+
+  const panel = document.getElementById('avisos');
+  if (!state.avisos) { panel?.remove(); }
+  else if (!panel) {
+    const el = document.createElement('div');
+    el.id = 'avisos';
+    el.setAttribute('role', 'region');
+    el.setAttribute('aria-label', 'Avisos');
+    el.innerHTML = lista.length === 0
+      ? '<p class="vacio">Nada todavia. Aqui te aviso cuando termine un trabajo.</p>'
+      : lista.map(j =>
+          // Un fallo lleva SIEMPRE al Historial, sea del paso que sea: lo que
+          // quiere quien lo pulsa es saber por que fallo, y eso esta en el
+          // registro. Mandarlo a Inicio porque el paso era "descargar" le
+          // enseña justo lo que no necesita.
+          '<button class="fila' + (j.status === 'error' ? ' fallo' : '') + '" data-ir="' +
+            (j.status === 'error' ? 'registro' : DESTINO[j.kind] ?? 'registro') + '">' +
+            '<b class="que">' +
+              (j.status === 'error' ? 'Fallo: ' + esc(j.label) : esc(PASO[j.kind] ?? j.label)) +
+            '</b>' +
+            '<span class="cuando">' + hace(j.endedAt) + '</span>' +
+          '</button>'
+        ).join('');
+    document.querySelector('header').appendChild(el);
+  }
+
+  document.getElementById('campana').setAttribute('aria-expanded', String(state.avisos));
+
+  /*
+   * El punto, y la animacion solo cuando el numero cambia.
+   *
+   * Mismo truco que el contador del menu: render() corre con cada aviso del
+   * servidor, casi siempre sin novedad. El valor anterior vive en el nodo para
+   * no llevar otra variable de estado, y el reflow forzado es lo que permite
+   * repetir la animacion sin que el navegador agrupe los dos cambios.
+   */
+  const boton = document.getElementById('campana');
+  const n = sinVer();
+  let punto = boton.querySelector('.bolita');
+  if (n === 0) { punto?.remove(); return; }
+  if (!punto) {
+    punto = document.createElement('i');
+    punto.className = 'bolita';
+    boton.appendChild(punto);
+  }
+  const antes = punto.dataset.n;
+  if (antes !== undefined && antes !== String(n)) {
+    punto.classList.remove('cambia');
+    void punto.offsetWidth;
+    punto.classList.add('cambia');
+  }
+  punto.dataset.n = String(n);
+}
+
+/** Abrir la campana marca todo como visto. Cerrarla no deshace eso. */
+function abrirAvisos(abrir) {
+  state.avisos = abrir;
+  if (abrir) {
+    const ultimo = listaAvisos()[0];
+    if (ultimo?.endedAt) {
+      state.vistos = ultimo.endedAt;
+      localStorage.setItem('klip:vistos', state.vistos);
+    }
+  }
+  pintarAvisos();
+}
+
+/** Abre o cierra el menu lateral. */
+function menu(abrir) {
+  document.getElementById('nav').classList.toggle('abierto', abrir);
+  document.getElementById('fondo').classList.toggle('abierto', abrir);
+}
+
+// Escapar cierra lo que este abierto: es lo que espera cualquiera en un
+// escritorio. Primero los avisos, que es lo que esta por encima.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (state.avisos) { abrirAvisos(false); return; }
+  menu(false);
+});
+
+/*
+ * Una mutacion de proyectos: manda, refresca y avisa.
+ *
+ * La respuesta trae el estado entero, asi que se guarda tal cual en vez de
+ * volver a pedirlo. El error se enseña con avisar() y NO se repinta: si el
+ * nombre estaba repetido, borrar lo que el usuario escribio le obliga a
+ * teclearlo otra vez para corregir una letra.
+ */
+/*
+ * La campaña elegida en Inicio, si la hay.
+ *
+ * Se recuerda en el aparato: al subir cinco videos de la misma campaña,
+ * volver a elegirla cada vez es donde se cuela el error de asignar uno mal.
+ */
+function campanaElegida() {
+  // 'campana-vod' y no 'campana': ese id ya es el de la campana de avisos.
+  const sel = document.getElementById('campana-vod');
+  if (!sel) return '';
+  state.campanaElegida = sel.value;
+  localStorage.setItem('klip:campana', sel.value);
+  return sel.value;
+}
+
+async function proyectoAccion(body, hecho) {
+  try {
+    state.proyectos = await api('/api/proyectos', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    render();
+    avisar(hecho);
+  } catch (err) {
+    avisar(err.message);
+  }
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+// --- Carga de datos -------------------------------------------------------
+
+async function cargarProceso() {
+  // Tambien las campañas: el desplegable de 'Añadir un video' vive aqui.
+  const [overview, jobs, proyectos] = await Promise.all([
+    api('/api/overview'), api('/api/jobs'), api('/api/proyectos'),
+  ]);
+  state.overview = overview;
+  state.jobs = jobs.jobs;
+  state.proyectos = proyectos;
+}
+
+async function cargarClips() {
+  const data = await api('/api/clips?status=' + state.filter);
+  state.counts = data.counts;
+  state.clips = data.clips;
+}
+
+async function cargarMetricas() {
+  state.metrics = await api('/api/metrics');
+}
+
+/*
+ * La campana se alimenta de state.jobs, que llena cargarProceso() en el primer
+ * refresco (la vista siempre arranca en Inicio) y mantiene vivo el canal de
+ * eventos, que escucha en las ocho secciones. No hace falta pedir los trabajos
+ * en cada cambio de seccion.
+ */
+async function refrescar() {
+  if (state.view === 'proceso') await cargarProceso();
+  if (state.view === 'clips') await cargarClips();
+  if (state.view === 'cola') state.queue = await api('/api/queue');
+  if (state.view === 'registro') state.runs = await api('/api/runs');
+  if (state.view === 'flujo') state.settings = await api('/api/settings');
+  if (state.view === 'ajustes') state.ajustes = await api('/api/ajustes');
+  if (state.view === 'proyectos') {
+    // Tambien los ajustes: el perfil de cada cliente enseña entre parentesis
+    // que valor hereda, y ese valor vive en Horarios.
+    const [pr, se] = await Promise.all([api('/api/proyectos'), api('/api/settings')]);
+    state.proyectos = pr;
+    state.settings = se;
+  }
+  /*
+   * Cuentas necesita las tres: /api/plataformas da el resumen de
+   * publicaciones, /api/proyectos quien es cada cuenta y de que cliente, y
+   * /api/settings el tope del plan, que es lo que decide cuantas se pueden
+   * crear todavia.
+   */
+  if (state.view === 'plataformas') {
+    const [p, pr, se] = await Promise.all([
+      api('/api/plataformas'),
+      api('/api/proyectos'),
+      api('/api/settings'),
+    ]);
+    state.plataformas = p;
+    state.proyectos = pr;
+    state.settings = se;
+  }
+  if (state.view === 'metricas') await cargarMetricas();
+  /*
+   * El detalle se pide cada vez que se entra, no se cachea.
+   *
+   * Los clips cambian de estado mientras se revisa y la linea de tiempo pinta
+   * ese estado. Un detalle guardado enseñaria quince momentos "sin revisar"
+   * despues de haber aprobado la mitad.
+   */
+  if (state.view === 'vod' && state.vodId) {
+    state.vod = await api('/api/sources/' + encodeURIComponent(state.vodId));
+  }
+  render();
+}
+
+/*
+ * Aviso breve de que algo se guardo.
+ *
+ * Se reemplaza el aviso anterior en vez de apilar: dos clics seguidos en
+ * Guardar producian dos mensajes iguales uno encima de otro, que se lee como un
+ * fallo. El temporizador se guarda en el propio elemento para no llevar una
+ * variable suelta por esto.
+ */
+function avisar(texto) {
+  document.getElementById('aviso')?.remove();
+  const el = document.createElement('div');
+  el.id = 'aviso';
+  el.setAttribute('role', 'status');
+  el.textContent = texto;
+  document.body.appendChild(el);
+
+  setTimeout(() => {
+    el.classList.add('sale');
+    // No se espera al evento de fin de animacion: con movimiento reducido dura
+    // 0,01 ms y con animaciones desactivadas del todo no llegaria nunca.
+    setTimeout(() => el.remove(), 200);
+  }, 2600);
+}
+
+/*
+ * Esqueleto de carga, con la forma de lo que va a llegar.
+ *
+ * Sustituye al "Cargando..." que habia en las seis vistas. Aquel texto ocupaba
+ * una linea y lo que llegaba ocupaba media pantalla, asi que al aparecer los
+ * datos todo daba un salto. El esqueleto reserva el sitio y la llegada no mueve
+ * nada.
+ *
+ * El parametro filas es cuantas tarjetas fingir; conCifras anade la banda de
+ * tres numeros que llevan Inicio y Metricas.
+ */
+/*
+ * Encabezado de seccion.
+ *
+ * Sustituye al rotulo gris suelto. Lleva tres cosas y las tres hacen falta:
+ * un icono para reconocer la seccion de un vistazo al volver, el nombre, y una
+ * linea que diga PARA QUE sirve.
+ *
+ * Esa linea es lo que mas se nota: "Reparto" no significa nada para quien
+ * entra por primera vez, y esta gente son clientes, no quien monto esto.
+ */
+function seccion(icono, titulo, explica) {
+  return '<div class="seccion">' +
+    '<i class="ico">' + icono + '</i>' +
+    '<div>' +
+      '<h2>' + esc(titulo) + '</h2>' +
+      (explica ? '<p>' + esc(explica) + '</p>' : '') +
+    '</div>' +
+  '</div>';
+}
+
+function esqueleto(filas, conCifras) {
+  let h = '';
+  if (conCifras) {
+    h += '<article class="card"><div class="body">' +
+      '<div class="hueso alto"></div>' +
+    '</div></article>';
+  }
+  for (let i = 0; i < filas; i += 1) {
+    h += '<article class="card"><div class="body">' +
+      '<div class="hueso titulo"></div>' +
+      '<div class="hueso"></div>' +
+      '<div class="hueso medio"></div>' +
+      '<div class="hueso corto"></div>' +
+    '</div></article>';
+  }
+  // aria-busy se lo dice a quien navega con lector de pantalla, que no ve el
+  // barrido. Sin esto, la espera es silencio.
+  return '<div class="cascada" aria-busy="true" aria-label="Cargando">' + h + '</div>';
+}
+
+// --- Vista: proceso -------------------------------------------------------
+
+function pintarJob(job, destacado) {
+  const abierto = state.openLog === job.id;
+  // "En cola" es informativo, no una alerta: va en gris, que es la etiqueta
+  // sin clase. Antes salia en ambar y competia con los avisos de verdad.
+  const clase = {queued:'', running:'live', ok:'ok', error:'bad', cancelled:''}[job.status] || '';
+  return '<article class="card job ' + job.status + (destacado ? ' hero paso-1' : '') + '">' +
+    '<div class="body">' +
+      (destacado
+        ? '<p class="ante">Ahora mismo</p>'
+        : '') +
+      '<div class="joghead">' +
+        '<span class="jobname">' + esc(job.label) + '</span>' +
+        '<span class="badge ' + clase + '">' +
+          ({queued:'esperando', running:'trabajando', ok:'listo', error:'fallo', cancelled:'cancelado'}[job.status]) +
+        '</span>' +
+      '</div>' +
+      (job.lastLine ? '<div class="jobline">' + esc(job.lastLine) + '</div>' : '') +
+
+      /*
+       * Encolado y sin nadie que lo coja: hay que decirlo.
+       *
+       * El panel encola, pero quien ejecuta es el trabajador del ordenador con
+       * tarjeta grafica. Si no esta corriendo, la tarea se queda en "esperando"
+       * para siempre con "(sin salida)" debajo, y eso se lee como que el
+       * programa esta roto. No lo esta: no hay nadie escuchando.
+       *
+       * Un minuto de margen: el trabajador pregunta cada cinco segundos, asi
+       * que si en sesenta no lo ha cogido es que no esta.
+       */
+      (job.status === 'queued' && !job.claimedBy && minutosDesde(job.createdAt) >= 1
+        ? '<div class="warn" style="margin:10px 0 0">' +
+            '<b>Nadie la ha recogido.</b> Esta tarea la ejecuta el ordenador que tiene los ' +
+            'videos, y ahi no hay ningun trabajador escuchando. Arrancalo con ' +
+            '<i>npm run worker</i> y la cogera en unos segundos.' +
+          '</div>'
+        : '') +
+
+      '<div class="actions" style="margin-top:10px">' +
+        '<button class="chip" data-log="' + job.id + '">' + (abierto ? 'Ocultar detalles' : 'Ver detalles') + '</button>' +
+        (vivo(job) ? '<button class="chip" data-cancel="' + job.id + '">Cancelar</button>' : '') +
+      '</div>' +
+      (abierto
+        ? '<div class="log" id="log-' + job.id + '">' +
+            '<div class="hueso medio"></div><div class="hueso"></div>' +
+            '<div class="hueso corto"></div>' +
+          '</div>'
+        : '') +
+    '</div>' +
+  '</article>';
+}
+
+/**
+ * Que toca hacer ahora mismo.
+ *
+ * Es la pieza que mas acelera el uso del panel. Antes habia que mirar seis
+ * bloques y deducir en que punto estaba todo; ahora el panel lo deduce y lo
+ * dice en una frase con un solo boton.
+ *
+ * El orden de las comprobaciones es el de la tuberia, asi que siempre sale el
+ * primer hueco sin cubrir y no el ultimo.
+ */
+function siguientePaso(o) {
+  if (o.sources.length === 0) {
+    return { texto: 'Empieza con un video', sub: 'Pega un enlace de YouTube o sube uno de tu movil.', accion: null };
+  }
+
+  for (const s of o.sources) {
+    /*
+     * Un VOD revisado entero y descartado entero ya no tiene siguiente paso.
+     *
+     * Sin esto se quedaba atascado el primero de la lista: kick-cuenta-ejemplo
+     * tenia sus 15 clips descartados y el panel insistia en "Subir 15 videos
+     * para poder revisarlos", que es trabajo para nada sobre material que
+     * alguien ya dijo que no. Y al ser el primero, tapaba el siguiente paso de
+     * todos los demas videos.
+     */
+    if (s.clips > 0 && s.rejected >= s.clips) continue;
+
+    /*
+     * Una descarga fallida NO es el siguiente paso.
+     *
+     * Antes lo era, y ocupaba el sitio principal del panel: con cuarenta y
+     * cinco videos esperando revision, lo primero que se leia al entrar era
+     * "Falta sacar el texto de qlopnOiwLvk", sobre un video que no existe y que
+     * no se podia ni relanzar ni quitar.
+     *
+     * Es un estorbo que limpiar, no trabajo que hacer. Se salta aqui y se
+     * resuelve en su propia ficha, que ahora tiene boton para quitarlo.
+     */
+    if (!s.hasTranscript) continue;
+    if (s.clips === 0) {
+      return {
+        texto: 'Buscar los mejores momentos',
+        sub: s.title,
+        accion: { kind: 'select', source: s.sourceId, label: 'Elegir momentos' },
+      };
+    }
+    if (s.rendered === 0) {
+      return {
+        texto: 'Crear los videos de ' + plural(s.clips, 'momento'),
+        sub: s.title,
+        accion: { kind: 'render', source: s.sourceId, label: 'Renderizar' },
+      };
+    }
+    /*
+     * Subir es un paso mas de la tuberia, no un extra.
+     *
+     * Sin copia en la nube, revisar desde el movil enseña tarjetas sin video,
+     * que es justo el estado en el que estuvo el panel hasta ahora. Va aqui,
+     * antes de mirar si hay pendientes, porque revisar sin verlos no se puede.
+     */
+    /*
+     * Se cuenta lo REVISABLE, no lo renderizado.
+     *
+     * La subida se salta los descartados desde que dejo 110 MB de clips que
+     * nadie iba a ver ocupando la nube. El panel seguia contando los
+     * renderizados a secas, asi que pedia subir mas videos de los que iba a
+     * subir de verdad.
+     */
+    const revisables = Math.max(0, s.rendered - s.rejected);
+    if (revisables > 0 && (o.subidos?.[s.sourceId] ?? 0) === 0) {
+      return {
+        texto: 'Subir ' + plural(revisables, 'video') + ' para poder revisarlos',
+        sub: s.title + '. Sin esto no se ven desde el movil.',
+        accion: { kind: 'subir', source: s.sourceId, label: 'Subir para revisar' },
+      };
+    }
+  }
+
+  if (o.clips.pending > 0) {
+    return {
+      texto: plural(o.clips.pending, 'video espera', 'videos esperan') + ' que lo veas',
+      sub: 'Es lo unico que no puede hacer el programa solo.',
+      accion: { vista: 'clips', label: 'Revisar ahora' },
+    };
+  }
+
+  if (o.clips.approved === 0) {
+    return { texto: 'No has aprobado ningun video', sub: 'Hasta que apruebes alguno no hay nada que subir.', accion: null };
+  }
+
+  /*
+   * El reparto ya no se pide, se cuenta.
+   *
+   * Aqui habia dos pasos seguidos, "Hacer una copia para cada cuenta" y
+   * "Repartir entre las cuentas", cada uno con su boton. Los dos los hace ahora
+   * el programa en cuanto un video se queda sin nada por revisar. Dejarlos como
+   * siguiente paso pedia trabajo que ya estaba hecho, o peor, animaba a lanzar
+   * a mano algo que estaba a punto de lanzarse solo.
+   *
+   * Queda el aviso de que esta en marcha, que si es util: entre aprobar el
+   * ultimo clip y ver aparecer las fechas pasan un par de minutos, y sin esto
+   * ese hueco parece que no paso nada.
+   */
+  const sinRepartir = o.sources.find(
+    s => s.approved > 0 && ((o.enCola ?? {})[s.sourceId] ?? 0) === 0,
+  );
+  if (sinRepartir) {
+    return {
+      texto: 'Preparando el reparto',
+      sub: 'Las copias por cuenta y las fechas se hacen solas. Tarda un par de minutos.',
+      accion: { vista: 'cola', label: 'Ver la agenda' },
+    };
+  }
+
+  if (o.clips.approved < o.target) {
+    return {
+      texto: 'Te faltan videos aprobados',
+      sub: 'Tienes ' + o.clips.approved + ' y hacen falta ' + o.target + ' al dia. Se repetiran de mas.',
+      accion: { vista: 'clips', label: 'Seguir revisando' },
+    };
+  }
+
+  return { texto: 'Todo listo', sub: o.queue.total + ' subidas programadas y videos de sobra.', accion: null, ok: true };
+}
+
+function pintarSiguiente(o, ocupado) {
+  const p = siguientePaso(o);
+
+  let boton = '';
+  if (p.accion && !ocupado) {
+    const attrs = p.accion.vista
+      ? 'data-ir="' + p.accion.vista + '"'
+      : 'data-run="' + p.accion.kind + '"' + (p.accion.source ? ' data-source="' + esc(p.accion.source) + '"' : '');
+    boton = '<div class="actions" style="margin-top:var(--s4)">' +
+      '<button class="act go" ' + attrs + '>' + p.accion.label + '</button></div>';
+  }
+
+  return '<article class="card hero ancho paso-1"><div class="body">' +
+    '<p class="ante">Siguiente paso</p>' +
+    '<p class="hook" style="font-size:19px;margin-bottom:var(--s1)' +
+      (p.ok ? ';color:var(--ok)' : '') + '">' + esc(p.texto) + '</p>' +
+    '<p class="reason" style="margin:0">' + esc(p.sub) + '</p>' +
+    boton +
+  '</div></article>';
+}
+
+/*
+ * Una tarjeta de VOD.
+ *
+ * enCurso no es lo mismo que ocupado. Ocupado significa que hay ALGUN trabajo
+ * corriendo, y con eso se apagan todos los botones para no encolar dos cosas a
+ * la vez. En curso significa que el trabajo es sobre ESTE video, y es lo unico
+ * que justifica animar su paso activo: si late en los tres VOD a la vez, el
+ * latido deja de senalar nada.
+ *
+ * (Sin acentos graves en estos comentarios: la pagina entera vive dentro de una
+ * plantilla de texto y uno solo la cierra a media altura. Ya ha pasado.)
+ */
+function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
+  /*
+   * Cinco estados en secuencia. El primero sin cubrir es "ahora"; los
+   * anteriores estan hechos y los siguientes aun no tocan.
+   *
+   * "En la nube" va entre los videos y las copias por cuenta porque ese es el
+   * orden real: primero se renderiza, luego se sube para poder revisarlo desde
+   * el movil, y solo lo aprobado merece que se generen veinte variantes.
+   */
+  const hechos = [s.hasTranscript, s.clips > 0, s.rendered > 0, subidos > 0, variantes > 0];
+  const etiquetas = ['Texto', 'Momentos', 'Videos', 'En la nube', 'Copias'];
+  const ahora = hechos.indexOf(false);
+
+  const cifras = [null, s.clips, s.rendered, subidos, variantes];
+
+  const acciones = [
+    null,
+    ['select', 'Buscar los mejores momentos'],
+    ['render', 'Crear los videos'],
+    ['subir', 'Subir para revisar'],
+    ['variants', 'Hacer una copia por cuenta'],
+  ];
+  /*
+   * Tres situaciones distintas, no dos.
+   *
+   * La version anterior solo distinguia "queda algo" de "esta todo", y el paso
+   * 0 (sin transcripcion) caia en el mismo saco que "esta todo" porque su
+   * accion es null: transcribir no se lanza desde aqui, viene con el video.
+   * Resultado: un VOD todavia descargandose ofrecia el boton de renderizar, y
+   * al pulsarlo fallaba con "No existe transcript.json".
+   */
+  const sinEmpezar = ahora === 0
+  const terminado = ahora === -1
+
+  /*
+   * Cuatro, en realidad: tambien "no queda nada que hacer AQUI".
+   *
+   * Los pasos que siguen a los momentos solo tienen sentido sobre material que
+   * alguien pueda aprobar, y aprobar no se hace en esta ficha sino en Revisar
+   * videos. Sin esta comprobacion, un VOD con sus quince clips descartados
+   * seguia ofreciendo botones: al pulsarlos la tarea arrancaba, fallaba con "No
+   * hay clips aprobados" y encima remitia a un comando de consola que ya no
+   * existe. Paso el 2026-10-03 con kick-cuenta-ejemplo-114acf735a.
+   *
+   * Dos casos distintos y se distinguen a proposito:
+   *
+   *   todo descartado   se reviso y no valia nada. No hay vuelta: no hay
+   *                     material. Ofrecer "subir para revisar" es absurdo.
+   *   falta aprobar     hay clips sin mirar. La accion existe, pero esta en
+   *                     otra pantalla.
+   */
+  const revisables = s.clips - (s.rejected ?? 0)
+  const todoDescartado = s.clips > 0 && revisables === 0
+  const faltanAprobados = acciones[ahora]?.[0] === 'variants' && (s.approved ?? 0) === 0
+  const sinMaterial = todoDescartado || faltanAprobados
+  const siguiente = sinEmpezar || terminado || sinMaterial ? null : acciones[ahora]
+
+  /*
+   * Los momentos de ESTE video, para la linea de tiempo compacta.
+   *
+   * Vienen del overview con tres numeros por clip; aqui se traducen a la forma
+   * que entiende lineaTiempo(), que es la misma que usa el detalle. Asi las
+   * dos lineas -- la de la ficha y la grande -- son literalmente el mismo
+   * dibujo a dos tamaños y no pueden discrepar.
+   */
+  const dur = (s.durationMin ?? 0) * 60;
+  const suyos = (state.overview?.momentos?.[s.sourceId] ?? [])
+    .map(m => ({ start: m.s, end: m.e, id: '', hook: '',
+                 status: m.t === 'si' ? 'approved' : m.t === 'no' ? 'rejected' : 'pending' }));
+
+  return '<div class="src' + (enCurso ? ' trabajando' : '') + '">' +
+    '<div class="srchead">' +
+      // El titulo abre el detalle. Es el gesto que ya se espera en una lista:
+      // pinchas el nombre de la cosa y ves la cosa.
+      '<button class="srctitle" data-vod="' + esc(s.sourceId) + '">' + esc(s.title) + '</button>' +
+      (enCurso ? '<span class="girando" role="img" aria-label="Procesando">${espiral(15)}</span>' : '') +
+    '</div>' +
+    '<div class="srcmeta">' + (s.durationMin !== null ? s.durationMin + ' min' : 'duracion desconocida') + '</div>' +
+    /*
+     * La linea de tiempo, solo si sabemos cuanto dura el VOD y ya hay
+     * momentos. Sin duracion no hay escala, y una barra vacia no dice nada
+     * que no diga ya el paso "Momentos" de abajo.
+     */
+    (dur > 0 && suyos.length > 0 ? lineaTiempo(dur, suyos, true) : '') +
+
+    '<div class="steps">' +
+      etiquetas.map((label, i) =>
+        '<div class="step ' + (hechos[i] ? 'done' : i === ahora ? 'now' : '') + '">' +
+          label + (cifras[i] ? '<br>' + cifras[i] : '') +
+        '</div>'
+      ).join('') +
+    '</div>' +
+
+    (siguiente
+      ? '<div class="chips">' +
+          '<button class="chip primario" data-run="' + siguiente[0] + '" data-source="' + esc(s.sourceId) + '"' +
+          (ocupado ? ' disabled' : '') + '>' + siguiente[1] + '</button>' +
+          /*
+           * El atajo para musica, al lado del normal.
+           *
+           * Buscar momentos le pregunta a un modelo y eso gasta saldo; cuando
+           * se acaba, falla entero y no hay forma de seguir. Para un VOD de
+           * musica el atajo mide los picos de voz del propio audio y no gasta
+           * nada. Antes solo se mencionaba en el texto del error, que ademas
+           * remitia a una terminal.
+           */
+          (siguiente[0] === 'select'
+            ? '<button class="chip" data-run="momentos" data-source="' + esc(s.sourceId) + '"' +
+              (ocupado ? ' disabled' : '') + ' title="Para musica. Busca los estribillos midiendo el audio, sin gastar saldo.">' +
+              'Es musica: buscar estribillos</button>'
+            : '') +
+          // Rehacer un paso ya dado es legitimo (cambiaste los ajustes), pero
+          // no es lo normal, asi que va detras y sin destacar.
+          // Aqui 'ahora' solo puede ser 1, 2 o 3, asi que basta con mirar si hay
+          // un paso anterior que repetir.
+          (ahora > 1
+            ? '<button class="chip" data-run="' + acciones[ahora - 1][0] +
+              '" data-source="' + esc(s.sourceId) + '"' + (ocupado ? ' disabled' : '') + '>Repetir el paso anterior</button>'
+            : '') +
+        '</div>'
+      : sinMaterial
+        // Lo que falta no se hace aqui: hay que ir a aprobar. Se dice donde, y
+        // se distingue "nadie lo ha mirado" de "se miro y se descarto todo",
+        // que son situaciones muy distintas.
+        ? '<p class="reason" style="margin:0">' +
+            (todoDescartado
+              ? 'Se descartaron sus ' + s.clips + ' momentos, asi que no queda nada que publicar.'
+              : 'Falta aprobar alguno en Revisar para poder copiarlo a las cuentas.') +
+          '</p>'
+      : sinEmpezar
+        // Sin transcripcion no hay nada que lanzar: o sigue procesandose o
+        // fallo. Ofrecer un boton aqui solo lleva a un error incomprensible.
+        ? (ocupado
+            ? '<p class="reason" style="margin:0">Trabajando en el. ' +
+              'Cuando acabe te esperara en Revisar.</p>'
+            /*
+             * Una descarga fallida dejaba una ficha muerta y sin salida.
+             *
+             * El VOD se apunta en cuanto se conoce su identificador, antes de
+             * tener el video. Si la descarga falla, queda una ficha a cero que
+             * no avanza, no se puede relanzar porque no hay fichero, y tampoco
+             * se podia quitar: el 2026-10-09 una de esas era lo primero que se
+             * leia al abrir el panel.
+             */
+            : '<p class="reason" style="margin:0 0 var(--s3)">' +
+              'La descarga no llego a terminar, asi que no hay nada que cortar. ' +
+              'Vuelve a añadirlo desde arriba, o quitalo de la lista.</p>' +
+              '<div class="chips">' +
+                '<button class="chip" data-quitar-vod="' + esc(s.sourceId) + '">' +
+                'Quitar de la lista</button>' +
+              '</div>')
+        : '<div class="chips">' +
+            '<button class="chip" data-run="render" data-source="' + esc(s.sourceId) + '"' +
+            (ocupado ? ' disabled' : '') + '>Volver a crear los videos</button>' +
+          '</div>') +
+  '</div>';
+}
+
+/**
+ * Produccion acumulada y estado de las plataformas, en una linea.
+ *
+ * Responde a dos preguntas que los contadores de estado no responden: cuanto
+ * llevas hecho, y si eso tiene por donde salir. Con todo aprobado y repartido,
+ * "0 por revisar" se lee igual que no haber hecho nada nunca.
+ */
+function pintarRitmo(o) {
+  const r = o.ritmo ?? { semana: 0, total: 0 };
+  const plats = o.plataformas ?? [];
+
+  // Solo las que existen de verdad. Listar aqui "YouTube Shorts: no disponible"
+  // llenaria la pantalla de cosas que no se pueden hacer.
+  const reales = plats.filter(p => p.estado !== 'no-disponible');
+  const conectadas = reales.filter(p => p.estado === 'conectado');
+
+  const salida = reales.length === 0
+    ? ''
+    : conectadas.length > 0
+      ? conectadas.map(p => esc(p.nombre)).join(' y ') + ' conectado' + (conectadas.length === 1 ? '' : 's')
+      : 'Sin ninguna plataforma conectada todavia';
+
+  return '<article class="card flat paso-2"><div class="body">' +
+    '<p class="reason" style="margin:0">' +
+      (r.total === 0
+        ? 'Todavia no has sacado ningun momento.'
+        : plural(r.semana, 'momento') + ' esta semana, ' + r.total + ' en total.') +
+    '</p>' +
+    (salida
+      ? '<div class="plat" style="margin-top:var(--s2)">' +
+          '<span class="punto-estado ' + (conectadas.length > 0 ? 'si' : 'no') + '"></span>' +
+          '<span class="reason" style="margin:0;flex:1">' + salida + '</span>' +
+          '<button class="chip" data-ir="plataformas">Ver</button>' +
+        '</div>'
+      : '') +
+  '</div></article>';
+}
+
+/**
+ * Cuanto ocupan las copias de revision, y el aviso si falta la clave.
+ *
+ * Solo aparece cuando hay algo que decir. Un contador de espacio permanente en
+ * la pantalla principal es ruido: lo unico que importa es cuando se acerca al
+ * limite, y entonces deja de ser informacion y pasa a ser un aviso.
+ */
+function pintarNube(o) {
+  const bytes = o.nubeBytes ?? 0;
+  const mb = bytes / 1048576;
+  const LIMITE = 1024;
+
+  // El panel remoto sin clave enseña reproductores que no cargarian nunca.
+  if (o.remoto && o.hayNube === false && bytes > 0) {
+    return '<article class="card"><div class="body"><div class="warn" style="margin:0">' +
+      '<b>Falta la clave de Supabase en el servidor.</b> Hay videos subidos, pero este panel ' +
+      'no puede pedirlos sin SUPABASE_SERVICE_ROLE_KEY en sus variables de entorno.' +
+    '</div></div></article>';
+  }
+
+  if (mb < LIMITE * 0.7) return '';
+
+  return '<article class="card"><div class="body"><div class="warn" style="margin:0">' +
+    '<b>Las copias ocupan ' + mb.toFixed(0) + ' MB de ' + LIMITE + '.</b> ' +
+    'Cuando se llene no se podran subir videos nuevos. Las de los VOD que ya no revises ' +
+    'se pueden borrar sin perder nada: los originales siguen en tu ordenador.' +
+  '</div></div></article>';
+}
+
+function vistaProceso() {
+  const o = state.overview;
+  if (!o) return esqueleto(2, true);
+
+  const activo = state.jobs.find(vivo);
+  const ocupado = Boolean(activo);
+  /*
+   * En Inicio solo lo que pide atencion, o sea lo que fallo.
+   *
+   * Antes salia el historial entero: seis tarjetas de trabajos terminados que
+   * no hacen falta en la pantalla donde se empieza a trabajar, y que ademas se
+   * repiten ahora que el historial completo tiene su propio sitio en Ajustes.
+   */
+  const fallos = state.jobs.filter(j => j.status === 'error').slice(0, 3);
+
+  let html = '';
+
+  // Si hay algo corriendo, eso ES el estado y va primero. Si no, lo primero es
+  // que toca hacer.
+  html += activo ? pintarJob(activo, true) : pintarSiguiente(o, ocupado);
+
+  html += '<div class="card paso-2"><div class="stats">' +
+    '<div><b' + (o.clips.pending > 0 ? ' style="color:var(--azul-texto)"' : '') + '>' +
+      o.clips.pending + '</b><span>Por revisar</span></div>' +
+    '<div><b' + (o.clips.approved > 0 ? ' style="color:var(--indigo-texto)"' : '') + '>' +
+      o.clips.approved + '</b><span>Aprobados</span></div>' +
+    '<div><b>' + o.queue.total + '</b><span>En cola</span></div>' +
+  '</div></div>';
+
+  /*
+   * Cuanto se ha producido, y por donde sale.
+   *
+   * Va en gris y en una linea, no en un segundo bloque de cifras grandes. Los
+   * numeros de arriba son estado y piden una decision; estos son contexto. Dos
+   * rejillas identicas seguidas harian competir cinco cifras por la misma
+   * atencion y ninguna ganaria.
+   */
+  html += pintarRitmo(o);
+  html += pintarNube(o);
+
+  /*
+   * Campaña de destino, comun al enlace y a la subida.
+   *
+   * Se elige ANTES de mandar el video y no despues, porque el identificador del
+   * VOD lo decide la descarga: hasta que termina no hay nada a lo que colgarle
+   * una campaña, y pedirlo entonces significa acordarse media hora mas tarde.
+   *
+   * Sin campañas creadas no se enseña el desplegable: un selector con una sola
+   * opcion que dice "Sin asignar" solo ocupa sitio.
+   */
+  const campanas = state.proyectos?.campanas ?? [];
+  const selectorCampana = campanas.length
+    ? '<div class="field">' +
+        '<label for="campana-vod">Campaña</label>' +
+        '<select id="campana-vod">' + opcionesCampana(campanas, state.campanaElegida) + '</select>' +
+      '</div>'
+    : '';
+
+  html += seccion('&#43;', 'Añadir un video', 'Pega un enlace de YouTube o sube un MP4. El programa lo descarga, saca el texto y busca los mejores momentos.') +
+    '<article class="card"><div class="body">' +
+      selectorCampana +
+      '<div class="field">' +
+        '<label>Pega un enlace</label>' +
+        '<input id="url" placeholder="https://..." autocomplete="off" spellcheck="false">' +
+      '</div>' +
+      '<div class="actions" style="margin-bottom:var(--s4)">' +
+        '<button class="act sec" id="ingest"' + (ocupado ? ' disabled' : '') + '>' +
+          (ocupado ? 'Hay un trabajo en curso' : 'Descargar y transcribir') +
+        '</button>' +
+      '</div>' +
+      '<label>O sube un video de tu movil</label>' +
+      '<div class="drop" id="drop">' +
+        (ocupado ? 'Espera a que acabe el trabajo en curso' : 'Toca para elegir un MP4, o arrastralo aqui') +
+      '</div>' +
+      '<input type="file" id="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" hidden>' +
+      '<div class="barra" id="barra" hidden><i></i></div>' +
+      '<p class="reason" id="subiendo" style="margin:8px 0 0"></p>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">Vale cualquier video de movil o camara. ' +
+      'Cuando acabe, los videos te esperaran en Revisar.</p>' +
+    '</div></article>';
+
+  /*
+   * Los videos terminados se pliegan.
+   *
+   * La lista los enseñaba todos siempre, y cada uno ocupa su fila de pasos con
+   * sus botones. Con once videos eso eran cuatro pantallas de scroll para
+   * encontrar el unico que estaba a medias, y los diez de arriba no admitian
+   * ninguna accion util: ya estaban hechos.
+   *
+   * "Terminado" es: no queda nada por revisar Y o se descarto entero o ya esta
+   * repartido. Es decir, no hay ningun paso siguiente que dar.
+   *
+   * Lo repartido se mide por los envios en la cola, no por el contador de
+   * copias: ese contador solo se escribe cuando el reparto pasa por el
+   * trabajador, asi que marcaba cero en videos con doscientos envios puestos.
+   */
+  const terminado = s =>
+    s.hasTranscript && s.clips > 0 &&
+    s.approved + s.rejected >= s.clips &&
+    (s.rejected >= s.clips || ((o.enCola ?? {})[s.sourceId] ?? 0) > 0);
+
+  const enMarcha = o.sources.filter(s => !terminado(s));
+  const hechos = o.sources.filter(terminado);
+
+  const ficha = s => pintarFuente(
+    s,
+    ocupado,
+    o.variants[s.sourceId] ?? 0,
+    // Los pasos select, render, subir y variants llevan el sourceId como
+    // primer argumento. El ingest no: su identificador no existe hasta
+    // que el video se descarga, asi que ese trabajo no se atribuye a
+    // ninguna tarjeta y ninguna late. Es correcto: todavia no hay tarjeta.
+    Boolean(activo && activo.args && activo.args[0] === s.sourceId),
+    (o.subidos ?? {})[s.sourceId] ?? 0,
+  );
+
+  html += seccion('&#9635;', 'Tus videos', 'En que punto va cada uno. El circulo azul marca el paso en el que esta ahora mismo.') +
+    '<article class="card">' +
+      (o.sources.length === 0
+        ? '<div class="empty" style="padding:34px 20px">Todavia no hay ninguno.</div>'
+        : (enMarcha.length === 0
+            ? '<div class="empty" style="padding:34px 20px">Todo al dia. ' +
+              'Añade un video para empezar otro.</div>'
+            : enMarcha.map(ficha).join('')) +
+          (hechos.length > 0
+            ? '<details class="plegable" style="padding:0 var(--s4) var(--s4)">' +
+              '<summary>' + plural(hechos.length, 'video terminado', 'videos terminados') +
+              '</summary>' + hechos.map(ficha).join('') + '</details>'
+            : '')) +
+    '</article>';
+
+  /*
+   * El reparto ya no es un boton, es una frase.
+   *
+   * Esto era una tarjeta con "Repartir entre las cuentas" y "Probar", y era el
+   * ultimo sitio del panel donde habia que acordarse de dar una orden: aprobar
+   * no bastaba, habia que volver aqui y pulsar. Desde que terminar de revisar
+   * un video encola el reparto solo, el boton sobra; lo que hace falta es
+   * contar lo que esta pasando.
+   *
+   * Queda un enlace discreto para rehacerlo, porque sigue habiendo un caso real
+   * en el que hace falta: cambiar los horarios no vuelve a repartir lo que ya
+   * estaba colocado.
+   */
+  html += seccion('&#9741;', 'Reparto', 'Como se colocan tus videos aprobados entre las cuentas. Va solo; no tienes que lanzarlo.') +
+    '<article class="card flat"><div class="body">' +
+      '<p class="lead" style="margin:0">' +
+        (o.clips.approved === 0
+          ? 'Cuando apruebes videos se repartiran solos entre tus <b>' + o.accounts + '</b> cuentas.'
+          : (o.clips.approved === 1
+              ? 'Tu <b>1</b> video aprobado se reparte'
+              : 'Tus <b>' + o.clips.approved + '</b> videos aprobados se reparten') +
+            ' entre <b>' + o.accounts + '</b> cuentas. Hay <b>' + o.queue.total + '</b> ' +
+            (o.queue.total === 1 ? 'envio programado' : 'envios programados') + '.') +
+      '</p>' +
+      '<details class="nota"><summary>No tienes que hacer nada</summary>' +
+        '<p>Al terminar de revisar un video, el programa prepara las copias y ' +
+        'las coloca en el calendario solo. Puedes verlo en Agenda.</p>' +
+        '<p>Si cambias los horarios y quieres recolocar lo que ya estaba puesto, ' +
+        'usa esto: <button class="chip" data-run="schedule"' + (ocupado ? ' disabled' : '') +
+        '>Rehacer el reparto</button></p>' +
+      '</details>' +
+    '</div></article>';
+
+  // Solo si hay algo roto. Un Inicio limpio significa que no hay nada que mirar.
+  if (fallos.length > 0) {
+    html += seccion('&#9888;', 'Algo fallo', 'Trabajos que no salieron bien. Si esta vacio, no hay nada que mirar.') + fallos.map(pintarJob).join('') +
+      '<p class="reason" style="margin:var(--s3) 0 0">' +
+      'El resto de lo que ha pasado esta en Ajustes, en Historial.</p>';
+  }
+
+  return html;
+}
+
+// --- Vista: clips ---------------------------------------------------------
+
+function renderTabs() {
+  if (state.view !== 'clips') { document.getElementById('tabs').innerHTML = ''; return; }
+  const tabs = [
+    ['pending', 'Pendientes'],
+    ['approved', 'Aprobados'],
+    ['rejected', 'Rechazados'],
+  ];
+  document.getElementById('tabs').innerHTML = tabs.map(([key, label]) =>
+    '<button class="tab" role="tab" aria-selected="' + (state.filter === key) + '" data-filter="' + key + '">' +
+    '<b>' + (state.counts[key] ?? 0) + '</b>' + label + '</button>'
+  ).join('');
+}
+
+function renderCard(c) {
+  const over = c.caption.length > 150;
+  const marcada = state.sel.has(llaveClip(c.sourceId, c.clipId));
+  return '<article class="card' + (marcada ? ' elegida' : '') + '"' +
+    ' data-source="' + esc(c.sourceId) + '" data-clip="' + esc(c.clipId) + '"' +
+    // Los limites originales: con ellos se sabe si el corte cambio y se
+    // traduce el instante del reproductor a segundos del VOD.
+    ' data-start="' + c.start + '" data-end="' + c.end + '">' +
+    /*
+     * La casilla va ENCIMA del video, arriba a la izquierda.
+     *
+     * No cabe en el cuerpo de la tarjeta: para marcar diez clips habria que
+     * bajar a los botones de cada uno, y el gesto de marcar en serie solo
+     * compensa si las casillas estan todas a la misma altura, que es la de la
+     * esquina de la miniatura.
+     */
+    '<label class="elegir">' +
+      '<input type="checkbox"' + (marcada ? ' checked' : '') +
+      ' aria-label="Marcar ' + esc(c.clipId) + ' para decidir en lote">' +
+    '</label>' +
+    // El src NO se pone aqui. Se asigna cuando la tarjeta entra en pantalla.
+    // Con seis videos de 30 MB, pedir metadatos de todos a la vez satura la
+    // conexion del movil antes de que se vea el primero.
+    // Sin video, el motivo importa: no es lo mismo que falte el render que que
+    // falte subirlo, y la segunda se arregla con un boton en Inicio.
+    (c.hasFile
+      ? '<video controls preload="none" playsinline data-src="/video/' +
+          encodeURIComponent(c.sourceId) + '/' + encodeURIComponent(c.clipId) + '"></video>'
+      : '<div class="warn" style="margin:14px">' +
+          (c.masterPath
+            ? 'Este video existe pero no esta subido. En el ordenador que los crea, ' +
+              'entra en Inicio y pulsa "Subir para revisar".'
+            : 'Falta el archivo renderizado de este clip.') +
+        '</div>') +
+    '<div class="body">' +
+      '<div class="meta">' +
+        '<span>' + esc(c.clipId) + '</span>' +
+        '<span>' + fmt(c.start) + ' - ' + fmt(c.end) + '</span>' +
+        '<span>' + c.durationSec + 's</span>' +
+        '<span class="score' + (c.score >= 60 ? ' alto' : '') + '">' + c.score + '</span>' +
+      '</div>' +
+      '<p class="hook">' + esc(c.hook) + '</p>' +
+      (c.reason ? '<p class="reason">' + esc(c.reason) + '</p>' : '') +
+      '<div class="field">' +
+        '<label>Descripcion del video</label>' +
+        '<textarea rows="2" class="caption">' + esc(c.caption) + '</textarea>' +
+        '<div class="count' + (over ? ' over' : '') + '">' + c.caption.length + ' / 150</div>' +
+      '</div>' +
+      '<div class="field">' +
+        '<label>Etiquetas</label>' +
+        '<input class="tags" value="' + esc(c.hashtags.join(', ')) + '">' +
+      '</div>' +
+      /*
+       * El recorte va plegado, y no sale en el panel remoto.
+       *
+       * Plegado porque la mayoria de los momentos salen bien cortados y la
+       * decision es aprobar o descartar. Dejar seis controles mas abiertos en
+       * cada una de las cuarenta y cinco tarjetas convertiria la pantalla de
+       * decidir en una de editar, que es lo contrario de lo que hace falta.
+       *
+       * Y no sale en el remoto porque rehacer un clip necesita el MP4 del
+       * directo y la tarjeta grafica, y en Hostinger no hay ninguna de las
+       * dos: el servidor rechaza esa tarea con un 501. Enseñar un boton que
+       * siempre contesta "hazlo en el otro ordenador" es peor que no
+       * enseñarlo, porque hay que pulsarlo para enterarse.
+       */
+      (state.overview?.remoto ? '' :
+      '<details class="corte">' +
+        '<summary>Ajustar el corte</summary>' +
+        '<p class="reason" style="margin:var(--s2) 0">Pon el video donde quieras que ' +
+          'empiece o acabe y pulsa el boton de al lado. Los segundos son del video largo.</p>' +
+        '<div class="corte-fila">' +
+          '<label>Empieza en' +
+            '<input type="number" class="corte-ini" step="0.1" min="0" value="' + c.start + '">' +
+          '</label>' +
+          '<button class="chip" data-marcar="ini">Empieza aqui</button>' +
+        '</div>' +
+        '<div class="corte-fila">' +
+          '<label>Acaba en' +
+            '<input type="number" class="corte-fin" step="0.1" min="0" value="' + c.end + '">' +
+          '</label>' +
+          '<button class="chip" data-marcar="fin">Acaba aqui</button>' +
+        '</div>' +
+        '<p class="corte-aviso">Sin cambios.</p>' +
+        '<div class="chips">' +
+          '<button class="chip" data-corte-reset>Dejarlo como estaba</button>' +
+          '<button class="chip primario" data-rehacer disabled>Rehacer este video</button>' +
+        '</div>' +
+        '<p class="reason" style="margin:var(--s2) 0 0">Rehacerlo lo devuelve a ' +
+          'pendientes: lo que apruebes tiene que ser lo que se publica.</p>' +
+      '</details>') +
+
+      '<div class="actions">' +
+        (state.filter === 'pending'
+          ? '<button class="act reject" data-do="rejected">Descartar</button>' +
+            '<button class="act approve" data-do="approved">Aprobar</button>'
+          : '<button class="act undo" data-do="pending">Devolver a pendientes</button>') +
+      '</div>' +
+    '</div>' +
+  '</article>';
+}
+
+function vistaClips() {
+  const labels = { pending: 'por revisar', approved: 'aprobado', rejected: 'descartado' };
+  if (state.clips.length === 0) {
+    // Cada filtro vacio significa algo distinto y merece su propia frase. "Nada
+    // por aqui" en los tres casos no ayuda: en pendientes puede ser que hayas
+    // terminado, y eso es una buena noticia, no un vacio.
+    const vacios = {
+      pending: ['Todo revisado', 'No queda ningun video esperando tu decision.'],
+      approved: ['Aun no has aprobado nada', 'Los que apruebes apareceran aqui listos para repartir.'],
+      rejected: ['Nada descartado', 'Los videos que rechaces se guardan aqui por si cambias de idea.'],
+    };
+    const [titulo, sub] = vacios[state.filter] ?? ['Nada por aqui', 'No hay ningun video ' + labels[state.filter] + '.'];
+    return '<div class="empty"><b>' + titulo + '</b>' + sub + '</div>';
+  }
+  /*
+   * La barra de lote se pinta siempre y se esconde con hidden.
+   *
+   * Si se creara al marcar el primero, aparecer y desaparecer movería la
+   * pagina entera cada vez que la seleccion pasa por cero, justo mientras
+   * estas pulsando. Existiendo desde el principio, solo cambia de visible.
+   */
+  const barra = '<div id="lote" class="lote ancho" role="region" aria-label="Decidir varios" hidden>' +
+    '<span class="cuantos"></span>' +
+    /*
+     * Un solo boton para la seleccion, no dos.
+     *
+     * "Marcar todos" y "Quitar la marca" son el mismo gesto en dos
+     * direcciones, y teniendo los dos la barra no cabia en una linea: el
+     * boton de aprobar se iba solo a una segunda fila, separado de descartar,
+     * que es la pareja que tiene que verse junta para no confundirlos.
+     */
+    '<button class="chip" data-marca>Marcar todos</button>' +
+    '<span class="hueco"></span>' +
+    '<button class="chip" data-lote="rejected">Descartar</button>' +
+    '<button class="chip primario" data-lote="approved">Aprobar</button>' +
+  '</div>';
+
+  // El contenedor lleva la cascada: las tarjetas entran escalonadas en vez de
+  // aparecer las treinta de golpe.
+  return barra + '<div class="cascada lista-clips">' + state.clips.map(renderCard).join('') + '</div>';
+}
+
+// --- Vista: cola ----------------------------------------------------------
+
+/*
+ * Programacion: que sale, en que cuenta y cuando.
+ *
+ * La version anterior solo tenia el resumen por VOD ("este se repite 4,2
+ * veces"). Sirve para juzgar si la cola esta sana, pero no responde a la
+ * pregunta que trae a alguien a una seccion llamada Programacion, que es
+ * "¿que se publica hoy?". Ahora el calendario va primero y el resumen queda
+ * detras, plegado.
+ */
+function diaDe(iso) {
+  const d = new Date(iso);
+  const hoy = new Date();
+  const manana = new Date(hoy.getTime() + 86400000);
+  const mismo = (a, b) => a.toDateString() === b.toDateString();
+  if (mismo(d, hoy)) return 'Hoy';
+  if (mismo(d, manana)) return 'Manana';
+  return d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'short' });
+}
+
+function horaDe(iso) {
+  const d = new Date(iso);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function vistaCola() {
+  const q = state.queue;
+  if (!q) return esqueleto(2, false);
+
+  if (q.total === 0) {
+    // Ya no se manda a pulsar nada: ese boton dejo de existir cuando el reparto
+    // paso a hacerse solo al terminar de revisar un video.
+    return '<div class="empty"><b>Nada programado</b>' +
+      'Aprueba los videos de alguno en Revisar. Al terminarlo, se reparten solos ' +
+      'entre las cuentas y aparecen aqui con su fecha.</div>';
+  }
+
+  let html = '';
+  const proximas = q.proximas ?? [];
+
+  if (proximas.length === 0) {
+    html += '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
+      '<b>No queda nada por publicar.</b> Las ' + q.total + ' entradas de la cola ya salieron ' +
+      'o fallaron. Aprueba mas videos y vuelve a repartir desde Inicio.' +
+    '</div></div></div>';
+  } else {
+    /*
+     * "Vencidas" casi nunca es una averia, y decir que lo es manda a buscar
+     * fantasmas.
+     *
+     * Este aviso culpaba al trabajador o a una cuenta desenlazada. El 2026-10-05
+     * habia 40 vencidas con el trabajador en marcha, el publicador entregando y
+     * cero fallos: lo que pasaba es que cada cuenta admite 13 entregas al dia y
+     * la cola iba por delante. Es el funcionamiento normal cuando se aprueba
+     * mas rapido de lo que TikTok deja publicar.
+     *
+     * Se explica primero la causa corriente y solo despues las que si son
+     * averias, que es el orden en que conviene mirarlas.
+     */
+    if (q.vencidas > 0) {
+      html += '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
+        '<b>' + q.vencidas + ' esperando turno.</b> Tenian hora asignada y ya paso. ' +
+        'Lo normal es que sea el ritmo: cada cuenta admite 13 entregas al dia, y van ' +
+        'saliendo en orden. Si no bajan en todo un dia, mira que el ordenador de casa ' +
+        'este encendido y que las cuentas sigan enlazadas.' +
+      '</div></div></div>';
+    }
+
+    // Agrupado por dia: cuarenta horas seguidas no dejan ver donde acaba hoy y
+    // empieza manana, que es justo lo que se viene a mirar.
+    let dia = null;
+    html += '<article class="card"><div class="body">';
+    for (const p of proximas) {
+      const suyo = diaDe(p.scheduledAt);
+      if (suyo !== dia) {
+        dia = suyo;
+        html += '<p class="reason" style="margin:var(--s4) 0 var(--s2);text-transform:capitalize">' +
+          esc(dia) + '</p>';
+      }
+      html += '<div class="fila-hora' + (p.vencida ? ' vencida' : '') + '">' +
+        '<span class="hora">' + horaDe(p.scheduledAt) + '</span>' +
+        '<span class="quien">' + esc(p.accountId) + '</span>' +
+        '<span class="que">' + esc(p.caption || p.title) + '</span>' +
+        (p.vencida ? '<span class="badge bad">sin salir</span>' : '') +
+      '</div>';
+    }
+    if (q.masAlla > 0) {
+      html += '<p class="reason" style="margin:var(--s4) 0 0">Y ' + q.masAlla +
+        ' mas despues. Aqui se listan las ' + proximas.length + ' primeras.</p>';
+    }
+    html += '</div></article>';
+  }
+
+  html += seccion('&#9679;', 'Salud de la cola', 'Si lo programado esta saliendo al ritmo previsto.') +
+    '<article class="card flat"><div class="body">' +
+      '<details class="nota"><summary>Que mide esto</summary>' +
+        '<p>Cuantas veces se repite cada video entre las cuentas. Repetir mucho cansa ' +
+        'a quien te sigue en varias. Por debajo de 4 esta bien; por encima de 8 conviene ' +
+        'aprobar mas videos.</p>' +
+      '</details>' +
+    '</div></article>';
+
+  return html + q.sources.map(s => {
+    // La repeticion media es el dato que dice si la cola esta sana. Se colorea
+    // porque es lo primero que hay que ver, no un numero mas de la lista.
+    const veces = s.items / s.clips;
+    const salud = veces <= 4 ? 'ok' : veces <= 8 ? 'wait' : 'bad';
+    const juicio = veces <= 4 ? 'bien repartido' : veces <= 8 ? 'algo justo' : 'se repite demasiado';
+    // "Algo justo" ya lo dice la etiqueta ambar de al lado. Pintar tambien la
+    // cifra de azul la haria parecer una accion, que no lo es: en indigo solo
+    // va lo que salio bien, y el resto de cifras son negras.
+    const color = { ok: 'ok', wait: '', bad: '' }[salud];
+
+    // Una cola cuya proxima entrega ya paso no esta "proxima": esta vencida, y
+    // decir "el proximo, el 10/9" cuando hoy es 11/9 es contradictorio.
+    const vencida = s.next !== null && new Date(s.next) < new Date();
+
+    return '<article class="card"><div class="body">' +
+      '<p class="hook">' + esc(s.title) + '</p>' +
+      '<div style="display:flex;align-items:baseline;gap:var(--s2);margin:var(--s3) 0 var(--s1)">' +
+        '<span class="cifra ' + color + '"' + (salud === 'bad' ? ' style="color:var(--no)"' : '') + '>' +
+          veces.toFixed(1) + '</span>' +
+        '<span style="font-size:var(--t-cuerpo);color:var(--dim)">veces se repite cada video</span>' +
+      '</div>' +
+      '<span class="badge ' + salud + '">' + juicio + '</span>' +
+      (vencida ? ' <span class="badge bad">cola vencida</span>' : '') +
+      '<div class="stats" style="margin:var(--s4) calc(-1 * var(--s4)) 0;' +
+        'border-top:1px solid var(--line)">' +
+        '<div><b>' + s.clips + '</b><span>Videos</span></div>' +
+        '<div><b>' + s.items + '</b><span>Subidas</span></div>' +
+        '<div><b>' + s.accounts + '</b><span>Cuentas</span></div>' +
+      '</div>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">' +
+        Object.entries(s.byStatus).map(([k, v]) =>
+          v + ' ' + ({pending:'en espera', published:'publicados', failed:'fallidos', skipped:'saltados'}[k] || k)
+        ).join(', ') +
+        (s.next
+          ? (vencida
+              ? '. El primero estaba previsto para ' + cuando(s.next) + ' y sigue sin salir'
+              : '. El proximo, ' + cuando(s.next))
+          : '') + '.' +
+      '</p>' +
+      (vencida
+        ? '<details class="nota"><summary>Por que no ha salido</summary>' +
+          '<p>Estaba programado para una fecha que ya paso y nadie lo subio. ' +
+          'Revisa en Cuentas que la cuenta siga enlazada, y vuelve a repartir ' +
+          'desde Inicio.</p>' +
+          '</details>'
+        : '') +
+    '</div></article>';
+  }).join('');
+}
+
+/** Fecha en lenguaje natural: la hora sola no dice si es hoy o pasado mañana. */
+function cuando(iso) {
+  const d = new Date(iso);
+  const hoy = new Date();
+  const dias = Math.round((d.setHours(0,0,0,0) - hoy.setHours(0,0,0,0)) / 86400000);
+  const hora = hora_(iso);
+  if (dias === 0) return 'hoy a las ' + hora;
+  if (dias === 1) return 'mañana a las ' + hora;
+  if (dias < 0) return 'el ' + new Date(iso).toLocaleDateString('es') + ' a las ' + hora;
+  return 'en ' + dias + ' dias a las ' + hora;
+}
+
+function hora_(iso) {
+  const d = new Date(iso);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+// --- Vista: registro ------------------------------------------------------
+
+/** Duracion en algo legible. 522000 ms no dice nada; "8 min 42 s" si. */
+function dur(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + ' s';
+  const m = Math.floor(s / 60);
+  return m + ' min' + (s % 60 ? ' ' + (s % 60) + ' s' : '');
+}
+
+/** Pares clave-valor como "3.027 segmentos · 7 ventanas". */
+function pares(obj) {
+  return Object.entries(obj)
+    .map(([k, v]) => (typeof v === 'number' ? v.toLocaleString('es') : v) + ' ' + k)
+    .join(' · ');
+}
+
+function fecha(iso) {
+  const d = new Date(iso);
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return d.getDate() + ' ' + meses[d.getMonth()] + ' ' + hora_(iso);
+}
+
+/*
+ * El diagnostico vive aqui, no en Inicio.
+ *
+ * Es la herramienta de "algo falla y no se por que", asi que su sitio es al
+ * lado del registro de lo que ha pasado. En Inicio ocupaba espacio permanente
+ * para algo que se usa dos veces al año.
+ */
+function tarjetaDiagnostico() {
+  const ocupado = Boolean(state.jobs.find(vivo));
+  return '<article class="card flat"><div class="body">' +
+      '<button class="chip" data-run="doctor"' + (ocupado ? ' disabled' : '') + '>' +
+      'Revisar que todo funciona</button>' +
+      '<details class="nota"><summary>Cuando usar esto</summary>' +
+        '<p>Comprueba que el programa tiene todo lo que necesita para funcionar. ' +
+        'Sirve cuando algo falla y no sabes por que.</p>' +
+      '</details>' +
+    '</div></article>';
+}
+
+function vistaRegistro() {
+  const r = state.runs;
+  if (!r) return esqueleto(3, true);
+
+  if (r.runs.length === 0) {
+    return tarjetaDiagnostico() +
+      '<div class="empty"><b>Aun no hay nada</b>' +
+      'Cada tarea que haga el programa quedara anotada aqui ' +
+      'con lo que uso, lo que creo y lo que costo.</div>';
+  }
+
+  const t = r.totals;
+
+  let html = tarjetaDiagnostico() +
+    '<article class="card hero"><div class="body" style="text-align:center">' +
+      '<p class="ante">Gastado hasta ahora</p>' +
+      '<p class="cifra info" style="margin:0">$' + t.costUsd.toFixed(2) + '</p>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">' +
+        plural(t.count, 'tarea') + ' · ' + dur(t.durationMs) + ' de proceso · ' +
+        (t.inputTokens + t.outputTokens).toLocaleString('es') + ' tokens' +
+      '</p>' +
+    '</div></article>';
+
+  // Desglose por comando: enseña de un vistazo que paso se lleva el dinero.
+  const kinds = Object.entries(t.byKind).sort((a, b) => b[1].costUsd - a[1].costUsd);
+  if (kinds.length > 1) {
+    html += '<article class="card"><table>' +
+      '<tr><th>Tarea</th><th>Veces</th><th>Tiempo</th><th>Costo</th></tr>' +
+      kinds.map(([k, v]) =>
+        '<tr><td>' + esc(NOMBRES[k] || k) + '</td><td>' + v.count + '</td>' +
+        '<td>' + dur(v.durationMs) + '</td>' +
+        '<td' + (v.costUsd > 0 ? '' : ' style="color:var(--faint)"') + '>' +
+        (v.costUsd > 0 ? '$' + v.costUsd.toFixed(2) : '0') + '</td></tr>'
+      ).join('') +
+    '</table></article>';
+  }
+
+  html += seccion('&#9776;', 'Una por una', 'Cada envio con su hora y su cuenta, por dia.') +
+    r.runs.map(run =>
+      '<article class="card' + (run.status === 'error' ? ' job error' : '') + '"><div class="body">' +
+        '<div class="joghead">' +
+          '<span class="jobname">' + esc(run.label) + '</span>' +
+          '<span class="badge' + (run.status === 'error' ? ' bad' : '') + '">' + fecha(run.startedAt) + '</span>' +
+        '</div>' +
+        (run.status === 'error'
+          ? '<p class="reason" style="margin:var(--s3) 0 0;color:var(--no)">' + esc(run.error || 'fallo') + '</p>'
+          : '<div style="margin-top:var(--s3);font-size:var(--t-meta);line-height:1.7">' +
+              (Object.keys(run.input).length
+                ? '<div><span style="color:var(--faint)">uso</span>  ' + esc(pares(run.input)) + '</div>'
+                : '') +
+              (Object.keys(run.output).length
+                ? '<div><span style="color:var(--faint)">creo</span>  ' + esc(pares(run.output)) + '</div>'
+                : '') +
+            '</div>') +
+        '<p class="reason" style="margin:var(--s3) 0 0">' +
+          dur(run.durationMs) +
+          (run.costUsd > 0 ? ' · $' + run.costUsd.toFixed(4) : '') +
+          (run.tokens
+            ? ' · ' + run.tokens.inputTokens.toLocaleString('es') + ' / ' +
+              run.tokens.outputTokens.toLocaleString('es') + ' tokens'
+            : '') +
+        '</p>' +
+      '</div></article>'
+    ).join('');
+
+  return html;
+}
+
+const NOMBRES = {
+  ingest: 'Transcribir', select: 'Elegir momentos', render: 'Renderizar',
+  variants: 'Variantes', schedule: 'Repartir', publish: 'Publicar', metrics: 'Metricas',
+};
+
+// --- Vista: flujo ---------------------------------------------------------
+
+/** Hora en formato de 12 horas, que es como la lee la gente. */
+function hora12(h) {
+  const H = Math.floor(h) % 24;
+  const ampm = H < 12 ? 'AM' : 'PM';
+  return (H % 12 === 0 ? 12 : H % 12) + ':00 ' + ampm;
+}
+
+/** Opciones de un desplegable de horas, de 6 AM a 11 PM. */
+function opcionesHora(actual) {
+  let out = '';
+  for (let h = 6; h <= 23; h += 1) {
+    out += '<option value="' + h + '"' + (Math.floor(actual) === h ? ' selected' : '') + '>' +
+      hora12(h) + '</option>';
+  }
+  return out;
+}
+
+/** Desplegable generico a partir de pares [valor, texto]. */
+function opciones(lista, actual) {
+  return lista.map(([v, t]) =>
+    '<option value="' + v + '"' + (Number(actual) === v ? ' selected' : '') + '>' + t + '</option>'
+  ).join('');
+}
+
+/**
+ * Los ajustes, en lenguaje de persona.
+ *
+ * Dos cambios respecto a la version anterior, los dos por lo mismo: esto lo usa
+ * quien gestiona las cuentas, no quien escribio el programa.
+ *
+ * 1. Horas en formato de 12 h. "23" es como lo guarda el sistema, pero nadie
+ *    dice "las 23"; dice "las 11 de la noche".
+ * 2. Desplegables en vez de campos numericos donde habia que conocer la unidad.
+ *    "90 min" obliga a traducir mentalmente; "hora y media" no. Y de paso
+ *    impide escribir un valor sin sentido.
+ */
+const BLOQUES = [
+  {
+    icono: '&#9636;', titulo: 'Cuanto se publica',
+    pie: 'Cuantos videos salen al dia y en que horario.',
+    campos: [
+      /*
+       * "Cuentas" YA NO SE ESCRIBE AQUI.
+       *
+       * Era un numero suelto que no tenia por que parecerse a la realidad: el
+       * 2026-09-28 ponia 13 mientras habia 20 cuentas creadas y una sola
+       * enlazada con TikTok, y toda la seccion calculaba sobre esas trece.
+       * Ahora lo cuenta el servidor y se enseña arriba, con su explicacion.
+       */
+      { key: 'postsPerDay',  texto: 'Veces al dia en cada una', tipo: 'num' },
+      { key: 'dayStartHour', texto: 'Desde las',                tipo: 'hora' },
+      { key: 'dayEndHour',   texto: 'Hasta las',                tipo: 'hora' },
+      /*
+       * El tope SI se escribe, al contrario que el numero de cuentas.
+       *
+       * No es una cifra que describa la realidad -- eso es lo que se cuenta --
+       * sino una decision: hasta cuantas quieres poder llegar. Estaba escrita
+       * a mano en tres sitios del codigo y habia que desplegar para cambiarla.
+       *
+       * Las opciones siguen a los planes reales del proveedor, no a numeros
+       * redondos: 25 es el plan contratado de upload-post.
+       */
+      /*
+       * El tope se elige por PLAN, no tecleando un numero.
+       *
+       * Quien decide cuantas cuentas caben no es este programa: es el plan
+       * contratado de upload-post. Una cuenta de mas es una que falla al
+       * publicar porque no tiene perfil al otro lado, y el error que llega no
+       * dice "te falta plan", dice un rechazo del proveedor.
+       *
+       * Las opciones las manda el servidor desde publish/planes.ts; aqui solo
+       * se marca que este campo las usa, igual que hace la tipografia.
+       */
+      { key: 'maxCuentas', texto: 'Tope de cuentas, segun tu plan', planes: true },
+    ],
+  },
+  {
+    icono: '&#9888;', titulo: 'Para que no parezca spam',
+    pie: 'Si el mismo video sale muchas veces seguidas, TikTok lo nota. Cuanto mas lo separas, mas videos distintos necesitas.',
+    campos: [
+      {
+        key: 'clipCooldownMinutes',
+        texto: 'Antes de repetir un video en otra cuenta, esperar',
+        tipo: 'lista',
+        lista: [[30, 'media hora'], [60, '1 hora'], [90, 'hora y media'],
+                [120, '2 horas'], [180, '3 horas'], [240, '4 horas']],
+      },
+      {
+        key: 'accountRepeatHours',
+        texto: 'Antes de repetirlo en la misma cuenta, esperar',
+        tipo: 'lista',
+        lista: [[24, '1 dia'], [48, '2 dias'], [72, '3 dias'],
+                [120, '5 dias'], [168, '1 semana'], [336, '2 semanas']],
+      },
+      {
+        key: 'jitterMinutes',
+        texto: 'Cambiar un poco la hora cada dia',
+        tipo: 'lista',
+        lista: [[0, 'no, siempre igual'], [15, 'hasta 15 minutos'],
+                [30, 'hasta media hora'], [40, 'hasta 40 minutos'], [60, 'hasta 1 hora']],
+      },
+    ],
+  },
+];
+
+function vistaFlujo() {
+  const d = state.settings;
+  if (!d) return esqueleto(2, false);
+
+  const m = d.math;
+  const faltan = m.clipsNeededPerDay - d.approved;
+
+  // Las dos consecuencias, arriba y en cristiano. Son lo unico que hay que
+  // mirar despues de tocar cualquier perilla.
+  // La cifra que responde a todo, sola y enorme. El resto es contexto.
+  let html = '<article class="card hero"><div class="body" style="text-align:center">' +
+      '<p class="ante">Necesitas cada dia</p>' +
+      '<p class="cifra acc" style="margin:0">' + m.clipsNeededPerDay + '</p>' +
+      '<p style="margin:var(--s2) 0 0;font-size:var(--t-cuerpo)">videos distintos</p>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">Para llenar ' + m.slotsPerDay +
+        ' subidas al dia entre ' + d.settings.accounts + ' cuenta' +
+        (d.settings.accounts === 1 ? '' : 's') + ' que puede' +
+        (d.settings.accounts === 1 ? '' : 'n') + ' publicar.</p>' +
+      '<details class="nota" style="text-align:left">' +
+        '<summary>Por que ' + m.clipsNeededPerDay + ' y no ' + m.slotsPerDay + '</summary>' +
+        '<p>El mismo video se sube en varias cuentas, asi que no hace falta uno por subida. ' +
+        'Con ' + d.settings.clipCooldownMinutes + ' min de separacion y una franja de ' +
+        m.windowHours + ' h, cada video cabe ' + m.maxUsesPerClip + ' veces al dia. ' +
+        m.slotsPerDay + ' entre ' + m.maxUsesPerClip + ' son ' + m.clipsNeededPerDay + '.</p>' +
+      '</details>' +
+    '</div></article>';
+
+  /*
+   * De donde sale el numero de cuentas, dicho aqui mismo.
+   *
+   * Es la pregunta que aparece en cuanto deja de ser un campo editable. Y la
+   * diferencia entre creadas y enlazadas es justo lo que explica por que el
+   * plan es mas pequeño de lo que uno esperaba.
+   */
+  const c = d.cuentas;
+  if (c) {
+    const sinEnlazar = c.creadas - c.enlazadas;
+    html += '<article class="card"><div class="body">' +
+      '<div class="plat">' +
+        '<span class="punto-estado ' + (c.enlazadas > 0 ? 'si' : 'no') + '"></span>' +
+        '<span class="nombre">Cuentas que pueden publicar</span>' +
+        '<span class="badge ' + (c.enlazadas > 0 ? 'ok' : '') + '">' + c.enlazadas + ' de ' + c.creadas + '</span>' +
+      '</div>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">' +
+        (c.enlazadas === 0
+          ? 'Ninguna cuenta esta enlazada con TikTok todavia, asi que el plan de arriba es el minimo. '
+          : sinEnlazar > 0
+            ? sinEnlazar + ' cuenta' + (sinEnlazar === 1 ? '' : 's') + ' sin enlazar no cuenta' +
+              (sinEnlazar === 1 ? '' : 'n') + ' para el plan: sin permiso de TikTok no pueden subir nada. '
+            : 'Todas las cuentas creadas estan enlazadas. ') +
+        'Este numero no se escribe: sale de las cuentas enlazadas.' +
+      '</p>' +
+      '<div class="chips" style="margin-top:var(--s3)">' +
+        '<button class="chip" data-ir="plataformas">Ir a Cuentas</button>' +
+      '</div>' +
+    '</div></article>';
+  }
+
+  if (faltan > 0) {
+    html += '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
+      '<b>Te faltan videos.</b> Tienes ' + d.approved + ' aprobado' + (d.approved === 1 ? '' : 's') +
+      ' y hacen falta ' + m.clipsNeededPerDay + ' al dia. Hasta llegar ahi, los mismos videos ' +
+      'se repetiran mas de lo que deberian.' +
+    '</div></div></div>';
+  }
+
+  html += BLOQUES.map(b =>
+    seccion(b.icono ?? '&#9881;', b.titulo, b.pie) +
+    '<article class="card"><div class="body">' +
+      b.campos.map(c => {
+        const valor = d.settings[c.key];
+        const control =
+          c.planes
+            ? '<select data-set="' + c.key + '">' + opcionesPlan(d, valor) + '</select>'
+            : c.tipo === 'hora'
+              ? '<select data-set="' + c.key + '">' + opcionesHora(valor) + '</select>'
+              : c.tipo === 'lista'
+                ? '<select data-set="' + c.key + '">' + opciones(c.lista, valor) + '</select>'
+                : '<input type="number" data-set="' + c.key + '" value="' + valor + '">';
+
+        // Los desplegables ya llevan la unidad escrita dentro, asi que ocupan
+        // las dos columnas de la derecha y no dejan un hueco vacio al lado.
+        return '<div class="linea' + (c.tipo === 'num' ? '' : ' ancha') + '">' +
+          '<span>' + c.texto + '</span>' + control +
+        '</div>' +
+          // Debajo del desplegable, lo que implica el plan elegido. Un numero
+          // suelto no dice si da para lo que publicas.
+          (c.planes ? notaDelPlan(d, valor) : '');
+      }).join('') +
+      /*
+       * El pie NO se repite aqui.
+       *
+       * Ya lo dice la cabecera de la seccion, justo encima de esta tarjeta, y
+       * salia dos veces palabra por palabra: una arriba y otra al pie. En
+       * "Cuanto dura cada corte" y "Cuantos busca" se veia a simple vista y
+       * hacia la pantalla el doble de larga sin decir nada nuevo.
+       */
+    '</div></article>'
+  ).join('');
+
+  html += '<article class="card"><div class="body">' +
+      '<div class="actions">' +
+        // Era .undo (texto tenue sobre transparente) y parecia desactivado.
+        '<button class="act sec" id="reset">Dejarlo como estaba</button>' +
+        '<button class="act go" id="guardar">Guardar</button>' +
+      '</div>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">Al guardar se cambian los horarios. ' +
+      'Las cuentas no se tocan: siguen siendo las mismas. ' +
+      'Despues, entra en Proceso y pulsa "Rehacer el reparto".</p>' +
+    '</div></article>';
+
+  return html;
+}
+
+/*
+ * Los valores de fabrica de Horarios. Deben coincidir con DEFAULTS en
+ * queue/settings.ts.
+ *
+ * El campo accounts NO se manda nunca: el servidor lo cuenta y rechaza el que
+ * venga del cliente. Se deja aqui para que "Dejarlo como estaba" no lo borre de la
+ * fila, pero su valor da igual.
+ */
+const BASE = {
+  accounts: 20, postsPerDay: 3, dayStartHour: 10, dayEndHour: 23,
+  jitterMinutes: 40, clipCooldownMinutes: 90, accountRepeatHours: 72,
+  maxCuentas: 25,
+};
+
+async function guardarFlujo(valores) {
+  try {
+    state.settings = await api('/api/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(valores),
+    });
+    render();
+    // El servidor rehace las franjas de todas las cuentas al guardar esto, y
+    // eso no se ve en ninguna cifra de la pantalla. Decirlo es la diferencia
+    // entre "ha pasado algo" y "no se si le he dado bien".
+    const a = state.settings.applied;
+    avisar(a && a.added + a.deactivated > 0
+      ? 'Guardado. ' + a.kept + ' cuentas siguen igual, ' + a.added + ' nuevas, ' + a.deactivated + ' desactivadas.'
+      : 'Guardado. Los horarios se han recalculado.');
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+// --- Vista: ajustes -------------------------------------------------------
+
+/*
+ * Como se cortan los videos.
+ *
+ * Mismo criterio que en Horarios: desplegables con la unidad escrita dentro en
+ * vez de campos numericos. "90" obliga a adivinar si son segundos o minutos;
+ * "minuto y medio" no, y de paso impide escribir un valor que el servidor
+ * rechazaria.
+ *
+ * Las listas NO pueden salirse de los rangos de select/ajustes.ts. Si alguien
+ * añade aqui una opcion de 4 minutos, el servidor la rechaza y el usuario ve un
+ * error sin entender que ha hecho mal.
+ */
+const CORTES = [
+  {
+    icono: '&#8942;', titulo: 'Cuanto dura cada corte',
+    pie: 'Los momentos que encuentre se ajustaran a esta horquilla. Mas corto retiene mejor; mas largo deja contar algo entero.',
+    campos: [
+      {
+        key: 'minSec', texto: 'Como minimo',
+        lista: [[10, '10 segundos'], [15, '15 segundos'], [20, '20 segundos'],
+                [30, 'medio minuto'], [45, '45 segundos'], [60, '1 minuto']],
+      },
+      {
+        key: 'maxSec', texto: 'Como maximo',
+        lista: [[30, 'medio minuto'], [45, '45 segundos'], [60, '1 minuto'],
+                [90, 'minuto y medio'], [120, '2 minutos'], [180, '3 minutos']],
+      },
+    ],
+  },
+  {
+    icono: '&#9636;', titulo: 'Cuantos busca',
+    pie: 'El directo se parte en trozos y se buscan los mejores momentos de cada uno, uno por uno. ' +
+         'Trozos mas pequeños reparten la atencion por todo el video y encuentran mas, pero son mas pasadas y cuestan mas.',
+    campos: [
+      {
+        key: 'perWindow', texto: 'Momentos por trozo, como mucho',
+        lista: [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']],
+      },
+      {
+        key: 'windowSec', texto: 'Cada trozo dura',
+        lista: [[300, '5 minutos'], [600, '10 minutos'], [900, 'un cuarto de hora'],
+                [1200, '20 minutos'], [1800, 'media hora']],
+      },
+    ],
+  },
+  {
+    icono: '&#9647;', titulo: 'Como salen los subtitulos',
+    pie: 'En TikTok la mayoria mira sin sonido, asi que quitarlos casi siempre cuesta visitas. ' +
+         'La altura los deja por encima de la franja donde TikTok pone el texto y los botones.',
+    campos: [
+      {
+        key: 'subtitles', texto: 'Subtitulos quemados en el video',
+        lista: [[1, 'si'], [0, 'no']],
+      },
+      // La lista de fuentes la manda el servidor: es la misma que valida, asi
+      // que el panel no puede ofrecer una que luego se rechace.
+      { key: 'subFont', texto: 'Tipografia', fuentes: true },
+      {
+        key: 'subSize', texto: 'Tamaño',
+        lista: [[48, 'pequeño'], [60, 'mediano'], [72, 'normal'], [90, 'grande'], [110, 'enorme']],
+      },
+      {
+        key: 'subMargin', texto: 'Altura sobre el borde',
+        lista: [[200, 'abajo del todo'], [300, 'bajo'], [380, 'normal'],
+                [500, 'alto'], [700, 'casi en el centro']],
+      },
+      { key: 'subColor', texto: 'Color del texto', color: true },
+      { key: 'subColorBorde', texto: 'Color del borde', color: true },
+      {
+        key: 'subBorde', texto: 'Grosor del borde',
+        lista: [[0, 'sin borde'], [3, 'fino'], [7, 'normal'], [12, 'grueso'], [18, 'muy grueso']],
+      },
+      {
+        key: 'subPalabras', texto: 'Palabras por rotulo',
+        lista: [[1, '1, muy rapido'], [2, '2'], [3, '3, normal'], [4, '4'],
+                [5, '5'], [7, '7, frases enteras']],
+      },
+      {
+        key: 'subAnimacion', texto: 'Animacion al aparecer',
+        lista: [[1, 'si'], [0, 'no']],
+      },
+    ],
+  },
+  {
+    icono: '&#9650;', titulo: 'El rotulo de arriba',
+    pie: 'Una frase quemada en la parte de arriba del video, fija durante todo el clip. ' +
+         'No es lo mismo que el texto de la publicacion: ese se lee debajo y quien pasa deprisa no llega a verlo. ' +
+         'El rotulo se ve en el primer segundo, que es lo que decide si alguien se queda. ' +
+         '{titulo} es el pie que propone el programa para ese clip.',
+    campos: [
+      {
+        key: 'tituloActivo', texto: 'Rotulo quemado en el video',
+        lista: [[1, 'si'], [0, 'no']],
+      },
+      { key: 'tituloTexto', texto: 'Que dice', textoLibre: true, pista: '{titulo}' },
+      {
+        key: 'tituloArriba', texto: 'Altura desde arriba',
+        lista: [[120, 'arriba del todo'], [180, 'alto'], [240, 'normal'],
+                [360, 'bajo'], [520, 'casi en el centro']],
+      },
+      {
+        key: 'tituloTam', texto: 'Tamaño',
+        lista: [[40, 'pequeño'], [52, 'mediano'], [64, 'normal'], [84, 'grande'], [104, 'enorme']],
+      },
+      { key: 'tituloColor', texto: 'Color del texto', color: true },
+      { key: 'tituloColorBorde', texto: 'Color del borde', color: true },
+      {
+        key: 'tituloBorde', texto: 'Grosor del borde',
+        lista: [[0, 'sin borde'], [3, 'fino'], [6, 'normal'], [12, 'grueso'], [18, 'muy grueso']],
+      },
+    ],
+  },
+  {
+    icono: '&#9998;', titulo: 'El texto de la publicacion',
+    pie: 'Lo que acompaña al video en TikTok. {titulo} es el pie que propone el programa para ese clip ' +
+         'y {hashtags} las etiquetas. Las fijas se añaden a todos los videos, sin repetir las que ya vengan.',
+    campos: [
+      // El salto va doble: dentro del template literal, un \\n suelto se
+      // convierte en un salto de linea real y parte esta cadena en dos.
+      { key: 'textoPlantilla', texto: 'Plantilla', textoLibre: true, multilinea: true,
+        pista: '{titulo}\\n\\n{hashtags}' },
+      { key: 'hashtagsFijos', texto: 'Etiquetas fijas', textoLibre: true, ancho: true,
+        pista: 'zoti, medellin, musicaurbana' },
+    ],
+  },
+  {
+    icono: '&#9741;', titulo: 'Al publicar',
+    pie: 'Directo publica en el perfil; borrador lo deja en la bandeja del movil para que lo suba el titular. ' +
+         'La API propia de TikTok no puede publicar directo hasta pasar la auditoria. ' +
+         'El ritmo son topes por cuenta: TikTok admite hasta 6 por minuto y 15 al dia.',
+    campos: [
+      {
+        key: 'proveedor', texto: 'Por donde se publica',
+        lista: [['upload-post', 'upload-post'], ['tiktok', 'API propia de TikTok']],
+        texto_valor: true,
+      },
+      {
+        key: 'modo', texto: 'Que se hace con el video',
+        lista: [['direct', 'publicarlo'], ['draft', 'dejarlo en la bandeja']],
+        texto_valor: true,
+      },
+      {
+        key: 'privacidad', texto: 'Quien lo ve',
+        lista: [['PUBLIC_TO_EVERYONE', 'todo el mundo'], ['MUTUAL_FOLLOW_FRIENDS', 'amigos'],
+                ['FOLLOWER_OF_CREATOR', 'seguidores'], ['SELF_ONLY', 'solo yo, en privado']],
+        texto_valor: true,
+      },
+      {
+        key: 'maxPorDia', texto: 'Como mucho al dia, por cuenta',
+        lista: [[3, '3'], [5, '5'], [8, '8'], [10, '10'], [13, '13, normal'], [15, '15, el tope']],
+      },
+      {
+        key: 'maxPorMinuto', texto: 'Como mucho por minuto, por cuenta',
+        lista: [[1, '1'], [2, '2'], [3, '3'], [5, '5, normal'], [6, '6, el tope']],
+      },
+    ],
+  },
+];
+
+/**
+ * Plantillas: juegos de ajustes con nombre.
+ *
+ * Va DENTRO de Ajustes y no en su propia seccion del menu. Una plantilla no es
+ * un sitio al que ir, es un atajo sobre los controles de abajo: separarlas
+ * obligaria a saltar entre dos pantallas para ver que hace cada una, y el menu
+ * ya tiene ocho entradas.
+ *
+ * La marcada es la que coincide exactamente con los ajustes vigentes. Se
+ * compara por valor y no se guarda "cual apliqué": si aplicas una y cambias un
+ * desplegable, la pastilla se apaga sola, que es la verdad.
+ */
+function pintarPlantillas(d) {
+  const lista = d.plantillas ?? [];
+  const a = d.ajustes;
+  /*
+   * La comparacion recorre TODOS los ajustes, no una lista a mano.
+   *
+   * Habia ocho nombres escritos aqui, de los veintisiete que existen ya. Una
+   * plantilla que solo se diferenciara en el color del subtitulo o en el
+   * rotulo salia marcada como "puesta" sin serlo, que es la clase de mentira
+   * pequeña que hace que luego nadie se fie de la pastilla.
+   *
+   * BASE_CORTES tiene una clave por ajuste y es la misma lista que se manda
+   * al guardar, asi que no puede quedarse corta al añadir el siguiente.
+   */
+  const igual = p => Object.keys(BASE_CORTES).every(k => p[k] === a[k]);
+
+  return seccion('&#9737;', 'Plantillas', 'Guarda un juego de ajustes con nombre para volver a el de un clic.') +
+    '<article class="card"><div class="body">' +
+      (lista.length === 0
+        ? '<p class="reason" style="margin:0 0 var(--s3)">Ninguna todavia. Deja los ajustes de abajo como los quieras ' +
+          'y guardalos con un nombre; asi puedes alternar entre, por ejemplo, ' +
+          'cortes de directo de juego y de podcast sin tocar ocho desplegables.</p>'
+        : '<div class="chips" style="margin-bottom:var(--s3)">' +
+            lista.map(p =>
+              '<span class="pastilla' + (igual(p) ? ' puesta' : '') + '">' +
+                '<button class="chip" data-plantilla="' + esc(p.id) + '"' +
+                  (igual(p) ? ' disabled' : '') + '>' + esc(p.nombre) + '</button>' +
+                '<button class="quita" data-borrar="' + esc(p.id) + '" ' +
+                  'aria-label="Borrar la plantilla ' + esc(p.nombre) + '">&times;</button>' +
+              '</span>'
+            ).join('') +
+          '</div>') +
+
+      '<div class="linea ancha">' +
+        '<input id="nombre-plantilla" placeholder="Nombre de la plantilla" maxlength="40" ' +
+          'autocomplete="off" spellcheck="false">' +
+        '<button class="chip" id="guardar-plantilla">Guardar los de abajo</button>' +
+      '</div>' +
+
+      (lista.length > 0
+        ? '<p class="reason" style="margin:var(--s3) 0 0">Guardar con un nombre que ya existe lo sobrescribe. ' +
+          'Aplicar una plantilla cambia los ajustes al momento; borrarla no los toca.</p>'
+        : '') +
+    '</div></article>';
+}
+
+/*
+ * Vista previa de como queda un clip con los ajustes actuales.
+ *
+ * Existe porque hasta ahora la unica forma de ver el efecto de cambiar la
+ * tipografia o el color era guardar, renderizar un video entero (minutos de
+ * GPU) y abrirlo. Con cinco perillas de estilo eso son cinco renders para
+ * afinar una cosa, asi que en la practica nadie las tocaba.
+ *
+ * Se dibuja en el navegador sobre un lienzo de 1080x1920 escalado, con las
+ * MISMAS cuentas que hace el generador del .ass: el cuerpo, el margen y el
+ * grosor del borde estan en pixeles de ese lienzo, asi que basta multiplicar
+ * por la escala. No es el render de verdad (libass reparte las lineas a su
+ * manera), pero acierta en lo que se viene a mirar: si se lee, si tapa la
+ * cara y si el color pega.
+ *
+ * El texto que se enseña es el de un clip REAL. Con texto de relleno no se ve
+ * lo que importa, que es si el pie que propone el programa cabe.
+ */
+function vistaPrevia(d) {
+  const a = d.ajustes;
+  const m = d.muestra;
+
+  if (!m) {
+    return seccion('&#9654;', 'Vista previa', 'Como queda un clip tuyo con estos ajustes. Cambia algo y se actualiza al momento, sin guardar.') +
+      '<article class="card"><div class="body">' +
+        '<p class="hook">Todavia no hay ningun momento</p>' +
+        '<p class="reason" style="margin-bottom:0">Cuando proceses un video, aqui veras ' +
+        'como queda con estos ajustes antes de gastar GPU en renderizarlo.</p>' +
+      '</div></article>';
+  }
+
+  // El estilo y el texto de cada capa salen de estiloCapa/textoCapa, que son
+  // los mismos que usa el refresco en vivo. Tenerlo dos veces era garantizar
+  // que la primera pintada y las siguientes acabaran discrepando.
+
+  const video = m.hayVideo
+    /*
+     * Este si se reproduce solo, al contrario que los de Revisar.
+     *
+     * Parado en el fotograma cero casi siempre sale negro -- el corte empieza
+     * en un fundido o en un plano oscuro -- y la vista previa parecia rota: un
+     * rectangulo negro con una frase encima. En marcha se ve de que va el clip
+     * y, sobre todo, si el texto tapa la cara cuando la cara se mueve.
+     *
+     * Va en silencio, en bucle y sin controles: es una muestra, no un
+     * reproductor. Aqui hay UNO solo; en Revisar hay cuarenta y cinco y
+     * arrancarlos todos seria insufrible.
+     */
+    ? '<video class="pv-video" autoplay muted loop playsinline preload="none" data-src="/video/' +
+        encodeURIComponent(m.sourceId) + '/' + encodeURIComponent(m.clipId) + '"></video>'
+    : '<div class="pv-sinvideo">sin copia en la nube<br>de este momento</div>';
+
+  return seccion('&#9654;', 'Vista previa', 'Como queda un clip tuyo con estos ajustes. Cambia algo y se actualiza al momento, sin guardar.') +
+    '<article class="card ancho"><div class="body">' +
+      '<div class="pv-fila">' +
+        '<div class="pv-marco">' +
+          video +
+          /*
+           * Las dos capas, con tabindex para poder colocarlas sin raton.
+           * El rotulo va antes que el subtitulo en el marcado por el mismo
+           * motivo que va en la capa 1 del .ass: si llegaran a solaparse, el
+           * que se lee entero es el de arriba.
+           */
+          capaHtml('titulo', a, m) +
+          capaHtml('sub', a, m) +
+        '</div>' +
+        '<div class="pv-datos">' +
+          '<p class="ante">Texto de la publicacion</p>' +
+          '<p class="pv-texto" id="pv-texto"></p>' +
+
+          /*
+           * Que esta encendido, en una lista corta.
+           *
+           * Esta columna tenia tres lineas al lado de un marco de 480 px de
+           * alto, asi que media tarjeta era hueco. Y lo que faltaba era
+           * precisamente esto: mirando el marco no se sabe si el rotulo esta
+           * apagado o es que el clip no tiene pie, ni con que tipografia sale.
+           */
+          '<p class="ante" style="margin-top:var(--s4)">Que lleva este video</p>' +
+          '<ul class="pv-lista">' +
+            '<li><span class="punto-estado ' + (a.subtitles ? 'si' : 'nada') + '"></span>' +
+              (a.subtitles
+                ? 'Subtitulos en ' + esc(a.subFont) + ', de ' + a.subPalabras +
+                  (a.subPalabras === 1 ? ' palabra' : ' palabras')
+                : 'Sin subtitulos') + '</li>' +
+            '<li><span class="punto-estado ' + (a.tituloActivo ? 'si' : 'nada') + '"></span>' +
+              (a.tituloActivo ? 'Rotulo arriba' : 'Sin rotulo arriba') + '</li>' +
+            '<li><span class="punto-estado ' + (a.subAnimacion && a.subtitles ? 'si' : 'nada') + '"></span>' +
+              (a.subAnimacion && a.subtitles ? 'Los rotulos entran animados' : 'Sin animacion') + '</li>' +
+          '</ul>' +
+
+          '<p class="ante" style="margin-top:var(--s4)">De donde sale</p>' +
+          '<p class="reason" style="margin:0">' + esc(m.sourceId) + ' / ' + esc(m.clipId) + '</p>' +
+        '</div>' +
+      '</div>' +
+      '<p class="reason" style="margin:var(--s4) 0 0">' +
+        (a.subtitles || a.tituloActivo
+          ? 'Arrastra el texto para colocarlo, o pulsalo y usa las flechas. Es aproximado: ' +
+            'el render reparte las lineas a su manera. Sirve para ver si se lee, si tapa la ' +
+            'cara y si el color pega.'
+          : 'El rotulo y los subtitulos estan apagados, asi que el video sale limpio.') +
+      '</p>' +
+    '</div></article>';
+}
+
+/**
+ * Arma el texto de la publicacion igual que lo hace el servidor.
+ *
+ * Es una copia de construirTexto (publish/texto.ts) y eso no es ideal, pero la
+ * alternativa es pedirselo al servidor en cada tecla. Lo que se enseña aqui
+ * debe coincidir con lo que se publica: si divergen, la vista previa miente,
+ * que es peor que no tenerla.
+ */
+function textoPublicacion(a, m) {
+  const limpiar = (s) => String(s).trim().replace(/^#+/, '').replace(/\\s+/g, '');
+  const vistas = new Set();
+  const todas = [];
+  const fuentes = [...(m.hashtags || []), ...String(a.hashtagsFijos || '').split(',')];
+  for (const bruto of fuentes) {
+    const h = limpiar(bruto);
+    if (h === '' || vistas.has(h.toLowerCase())) continue;
+    vistas.add(h.toLowerCase());
+    todas.push('#' + h);
+  }
+  return String(a.textoPlantilla || '{titulo} {hashtags}')
+    .replaceAll('{titulo}', m.caption || '')
+    .replaceAll('{hashtags}', todas.join(' '))
+    .replace(/[ \\t]+/g, ' ')
+    .replace(/\\n{3,}/g, '\\n\\n')
+    .trim()
+    .slice(0, 2200);
+}
+
+function vistaAjustes() {
+  const d = state.ajustes;
+  if (!d) return esqueleto(2, false);
+
+  const a = d.ajustes;
+
+  /*
+   * La consecuencia primero, igual que en Horarios.
+   *
+   * "3 momentos por trozo de 15 minutos" no significa nada hasta que se
+   * traduce a un numero sobre un video real del usuario. Y es la cifra que
+   * decide si los ajustes sirven: si salen 12 y hacen falta 20 al dia, no hay
+   * nada que revisar.
+   */
+  let html = d.ejemplo
+    ? '<article class="card hero paso-1"><div class="body" style="text-align:center">' +
+        '<p class="ante">De tu video mas largo saldrian</p>' +
+        '<p class="cifra acc" style="margin:0">' + d.ejemplo.clips + '</p>' +
+        '<p style="margin:var(--s2) 0 0;font-size:var(--t-cuerpo)">momentos, mas o menos</p>' +
+        '<p class="reason" style="margin:var(--s3) 0 0">' +
+          esc(d.ejemplo.titulo) + ', ' + d.ejemplo.minutos + ' min. ' +
+          'De esos apruebas tu los que valgan.</p>' +
+      '</div></article>'
+    : '<article class="card paso-1"><div class="body">' +
+        '<p class="hook">Todavia no hay ningun video</p>' +
+        '<p class="reason" style="margin-bottom:0">Cuando subas uno, aqui te dire cuantos momentos ' +
+        'saldrian con estos ajustes.</p>' +
+      '</div></article>';
+
+  html += vistaPrevia(d);
+  html += pintarPlantillas(d);
+
+  html += CORTES.map(b =>
+    seccion(b.icono ?? '&#9881;', b.titulo, b.pie) +
+    '<article class="card"><div class="body">' +
+      b.campos.map(c => {
+        // La tipografia es la unica que no es un numero: su lista la manda el
+        // servidor, que es quien la valida.
+        if (c.fuentes) {
+          const opts = (d.fuentes ?? []).map(f =>
+            '<option value="' + esc(f) + '"' + (f === a.subFont ? ' selected' : '') + '>' + esc(f) + '</option>'
+          ).join('');
+          return '<div class="linea ancha">' +
+            '<span>' + c.texto + '</span>' +
+            '<select data-ajuste="subFont" data-texto="1">' + opts + '</select>' +
+          '</div>';
+        }
+        // Un color necesita verse, no elegirse de una lista de nombres.
+        if (c.color) {
+          return '<div class="linea ancha">' +
+            '<span>' + c.texto + '</span>' +
+            '<input type="color" data-ajuste="' + c.key + '" data-texto="1" value="' +
+              esc(a[c.key] ?? '#FFFFFF') + '">' +
+          '</div>';
+        }
+
+        // Texto libre: la plantilla y las etiquetas fijas. Van en su propia
+        // linea porque son largas y al lado de la etiqueta no caben.
+        if (c.textoLibre) {
+          /*
+           * La plantilla va en un area de texto, no en un input de una linea.
+           *
+           * Un <input type="text"> DESCARTA los saltos de linea, asi que una
+           * plantilla como "{hashtags}\\n\\n{titulo}" se guardaba con todo
+           * pegado y el texto salia "#etiquetaTitulo". Se vio probando la vista
+           * previa: las etiquetas y el titulo aparecian sin separacion.
+           */
+          if (c.multilinea) {
+            return '<div class="field">' +
+              '<label>' + c.texto + '</label>' +
+              '<textarea data-ajuste="' + c.key + '" data-texto="1" rows="3" spellcheck="false"' +
+                (c.pista ? ' placeholder="' + esc(c.pista) + '"' : '') + '>' +
+                esc(a[c.key] ?? '') + '</textarea>' +
+            '</div>';
+          }
+          return '<div class="field">' +
+            '<label>' + c.texto + '</label>' +
+            '<input type="text" data-ajuste="' + c.key + '" data-texto="1" spellcheck="false"' +
+              ' value="' + esc(a[c.key] ?? '') + '"' +
+              (c.pista ? ' placeholder="' + esc(c.pista) + '"' : '') + '>' +
+          '</div>';
+        }
+
+        /*
+         * Las booleanas viajan como tal y se enseñan como 1/0; la privacidad
+         * es una lista de textos, no de numeros. La conversion se hace aqui y
+         * al guardar, en los dos extremos del mismo sitio.
+         */
+        const esBooleana = BOOLEANOS.has(c.key);
+        const valor = esBooleana ? (a[c.key] ? 1 : 0) : a[c.key];
+        return '<div class="linea ancha">' +
+          '<span>' + c.texto + '</span>' +
+          '<select data-ajuste="' + c.key + '"' + (c.texto_valor ? ' data-texto="1"' : '') + '>' +
+            opciones(c.lista, valor) + '</select>' +
+        '</div>';
+      }).join('') +
+      /*
+       * El pie NO se repite aqui.
+       *
+       * Ya lo dice la cabecera de la seccion, justo encima de esta tarjeta, y
+       * salia dos veces palabra por palabra: una arriba y otra al pie. En
+       * "Cuanto dura cada corte" y "Cuantos busca" se veia a simple vista y
+       * hacia la pantalla el doble de larga sin decir nada nuevo.
+       */
+    '</div></article>'
+  ).join('');
+
+  html += '<article class="card"><div class="body">' +
+      '<div class="actions">' +
+        '<button class="act sec" id="reset-ajustes">Dejarlo como estaba</button>' +
+        '<button class="act go" id="guardar-ajustes">Guardar</button>' +
+      '</div>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">' +
+        'Se aplica a los videos que proceses a partir de ahora. Los momentos ya ' +
+        'encontrados no cambian: para rehacerlos con estos ajustes, entra en Inicio ' +
+        'y vuelve a pulsar "Buscar los mejores momentos".</p>' +
+    '</div></article>';
+
+  // Lo que NO se puede tocar, dicho en vez de fingido con un control apagado.
+  html += '<article class="card flat"><div class="body">' +
+      '<details class="nota"><summary>Lo que no se puede cambiar todavia</summary>' +
+        '<p><b>El formato es vertical 9:16</b> y no hay otra opcion. El video se pone ' +
+        'a lo ancho con el fondo desenfocado detras, que es lo estandar en clips de ' +
+        'directo y nunca corta la cabeza a nadie.</p>' +
+        '<p><b>No hay marca de agua.</b> No esta hecha; poner aqui un interruptor que ' +
+        'no hace nada seria mentir.</p>' +
+        '<p><b>Los momentos los elige el modelo leyendo lo que se dice</b>, no los picos ' +
+        'de volumen ni el chat. En un directo sin chat eso es lo unico que hay, y ' +
+        'entiende el remate de una historia, que un pico de audio no.</p>' +
+      '</details>' +
+    '</div></article>';
+
+  return html;
+}
+
+/** Valores de fabrica. Son los mismos que CLIP_DEFAULTS en select/ajustes.ts. */
+/*
+ * Que ajustes son booleanos, en un solo sitio.
+ *
+ * Estaba escrito tres veces -- al pintar, al guardar y en la vista previa --
+ * como una condicion con dos nombres. Al añadir el tercero (tituloActivo) dos
+ * de las tres se habrian quedado viejas y el rotulo habria viajado como el
+ * numero 1 a una columna booleana.
+ */
+const BOOLEANOS = new Set(['subtitles', 'subAnimacion', 'tituloActivo']);
+
+const BASE_CORTES = {
+  minSec: 20, maxSec: 90, perWindow: 3, windowSec: 900,
+  subtitles: true, subFont: 'Impact', subSize: 72, subMargin: 380,
+  subColor: '#FFFFFF', subColorBorde: '#000000', subBorde: 7,
+  subPalabras: 3, subAnimacion: true,
+  tituloActivo: false, tituloTexto: '{titulo}', tituloArriba: 240, tituloTam: 64,
+  tituloColor: '#FFFFFF', tituloColorBorde: '#000000', tituloBorde: 6,
+  textoPlantilla: '{titulo} {hashtags}', hashtagsFijos: '',
+  privacidad: 'PUBLIC_TO_EVERYONE', maxPorMinuto: 5, maxPorDia: 13,
+  proveedor: 'upload-post', modo: 'direct',
+};
+
+async function guardarAjustes(valores) {
+  try {
+    state.ajustes = await api('/api/ajustes', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(valores),
+    });
+    render();
+    const e = state.ajustes.ejemplo;
+    avisar(e ? 'Guardado. Saldrian unos ' + e.clips + ' momentos.' : 'Guardado.');
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+/*
+ * Las tres operaciones de plantilla comparten forma: llaman, se quedan con la
+ * respuesta y repintan. Se escriben juntas porque la respuesta del servidor
+ * trae siempre la lista entera, asi que ninguna tiene que remendar el estado a
+ * mano; el unico cuidado es no perder el resto de state.ajustes cuando la
+ * respuesta solo trae la lista, que es el caso de borrar.
+ */
+async function plantillaAccion(url, options, exito) {
+  try {
+    const data = await api(url, options);
+    state.ajustes = { ...state.ajustes, ...data };
+    render();
+    avisar(exito(data));
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function guardarPlantilla() {
+  const input = document.getElementById('nombre-plantilla');
+  const nombre = input.value.trim();
+  if (!nombre) { input.focus(); return; }
+  plantillaAccion(
+    '/api/plantillas',
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nombre }) },
+    d => 'Plantilla "' + d.plantilla.nombre + '" guardada.',
+  );
+}
+
+// --- Vista: plataformas ---------------------------------------------------
+
+// --- Vista: proyectos -----------------------------------------------------
+
+/*
+ * Clientes y campañas.
+ *
+ * Dos niveles y un cajon de "sin asignar". El cajon no es un descuido: al
+ * aplicar el esquema, veinte cuentas y ocho VOD ya existian sin dueño, y
+ * obligar a colocarlos antes de poder usar la seccion habria sido pedir
+ * veintiocho decisiones de golpe. Lo que no esta asignado se ve, molesta un
+ * poco, y se coloca cuando toca.
+ */
+function opcionesCampana(campanas, elegida) {
+  return '<option value="">Sin asignar</option>' + campanas.map(k =>
+    '<option value="' + k.id + '"' + (k.id === elegida ? ' selected' : '') + '>' +
+      esc(k.clienteNombre) + ' / ' + esc(k.nombre) +
+    '</option>'
+  ).join('');
+}
+
+/** "14:00" a partir de una hora entera. */
+function hhmm(h) {
+  return String(h).padStart(2, '0') + ':00';
+}
+
+/**
+ * Opciones de un campo del perfil, con la herencia dicha en claro.
+ *
+ * El valor vacio es "General": hereda de Horarios. Se enseña entre parentesis
+ * lo que eso significa hoy, porque "General" a secas obliga a ir a la otra
+ * seccion para saber que implica.
+ */
+function opcionPerfil(actual, valores, heredado, etiqueta) {
+  let html = '<option value=""' + (actual === null ? ' selected' : '') + '>' +
+    'General (' + etiqueta(heredado) + ')</option>';
+  for (const v of valores) {
+    html += '<option value="' + v + '"' + (actual === v ? ' selected' : '') + '>' +
+      esc(etiqueta(v)) + '</option>';
+  }
+  return html;
+}
+
+function vistaProyectos() {
+  const d = state.proyectos;
+  if (!d) return esqueleto(3, false);
+
+  const sinCuenta = d.cuentas.filter(c => !c.clienteId);
+  const sinVod = d.vods.filter(v => !v.campanaId);
+
+  // Lo que hereda quien no tiene perfil propio. Si aun no se cargo Horarios se
+  // usan los valores de fabrica, que son los mismos que trae settings.ts.
+  const general = state.settings?.settings ?? { postsPerDay: 3, dayStartHour: 10, dayEndHour: 23 };
+
+  const nuevo =
+    '<article class="card"><div class="body">' +
+      '<h3 class="t">Nuevo cliente</h3>' +
+      '<div class="fila-nueva">' +
+        '<input id="nuevo-cliente" type="text" maxlength="80" placeholder="Nombre del cliente" ' +
+          'autocomplete="off" aria-label="Nombre del cliente nuevo">' +
+        '<button class="chip" data-pcrear-cliente="1">Crear</button>' +
+      '</div>' +
+    '</div></article>';
+
+  const fichas = d.clientes.map(c => {
+    const suyas = d.campanas.filter(k => k.clienteId === c.id);
+    const cuentas = d.cuentas.filter(x => x.clienteId === c.id);
+
+    return '<article class="card' + (c.archivado ? ' flat' : '') + '"><div class="body">' +
+      '<div class="plat">' +
+        '<span class="nombre">' + esc(c.nombre) + '</span>' +
+        (c.archivado ? '<span class="badge">archivado</span>' : '') +
+      '</div>' +
+
+      '<div class="stats" style="margin-top:var(--s3)">' +
+        '<div><b>' + cuentas.length + '</b><span>Cuentas</span></div>' +
+        '<div><b>' + suyas.length + '</b><span>Campañas</span></div>' +
+        '<div><b>' + suyas.reduce((n, k) => n + k.vods, 0) + '</b><span>VOD</span></div>' +
+      '</div>' +
+
+      /*
+       * Las cuentas, una por fila y no separadas por comas.
+       *
+       * En una linea de texto no cabe nada accionable: ni saber cual esta sin
+       * enlazar, ni sacar una del cliente. Con veinte cuentas y dos clientes,
+       * "acc-01, acc-04, acc-07" obliga a ir a otra seccion para cada gesto.
+       */
+      '<p class="reason" style="margin:var(--s4) 0 0">Cuentas de este cliente</p>' +
+      (cuentas.length
+        ? '<ul class="lista-campanas">' + cuentas.map(x =>
+            '<li>' +
+              '<span class="punto-estado ' + (x.tiktok ? 'si' : 'no') + '"></span>' +
+              '<span class="nombre">' + esc(x.id) + '</span>' +
+              (x.tiktok
+                ? '<span class="badge ok">@' + esc(x.tiktok) + '</span>'
+                : '<span class="badge">sin enlazar</span>') +
+              (x.tiktok
+                ? '<button class="chip" data-crevisar="' + esc(x.id) + '">Comprobar</button>'
+                : '<button class="chip" data-cenlazar="' + esc(x.id) + '">Enlazar</button>') +
+              '<button class="chip" data-psacar="' + esc(x.id) + '" ' +
+                'aria-label="Quitar ' + esc(x.id) + ' de ' + esc(c.nombre) + '">Quitar</button>' +
+            '</li>'
+          ).join('') + '</ul>'
+        : '<p class="reason" style="margin:var(--s2) 0 0">Ninguna. Asignale una desde "Sin asignar".</p>') +
+
+      /*
+       * El perfil del cliente.
+       *
+       * "General" (valor vacio) significa heredar lo de Horarios, y es lo que
+       * trae un cliente nuevo. Por eso cada campo enseña entre parentesis el
+       * valor heredado: sin eso, "General" no dice nada y hay que ir a la otra
+       * seccion a averiguar que implica.
+       */
+      '<p class="reason" style="margin:var(--s4) 0 0">Su ritmo de publicacion</p>' +
+      '<ul class="lista-campanas">' +
+        '<li><span class="nombre">Veces al dia</span>' +
+          '<select data-pperfil="' + c.id + '" data-campo="postsPerDay">' +
+            opcionPerfil(c.perfil.postsPerDay, [1,2,3,4,5,6], general.postsPerDay, n => n + ' al dia') +
+          '</select></li>' +
+        '<li><span class="nombre">Desde las</span>' +
+          '<select data-pperfil="' + c.id + '" data-campo="dayStartHour">' +
+            opcionPerfil(c.perfil.dayStartHour, [6,8,9,10,11,12,14], general.dayStartHour, hhmm) +
+          '</select></li>' +
+        '<li><span class="nombre">Hasta las</span>' +
+          '<select data-pperfil="' + c.id + '" data-campo="dayEndHour">' +
+            opcionPerfil(c.perfil.dayEndHour, [18,20,21,22,23,24], general.dayEndHour, hhmm) +
+          '</select></li>' +
+      '</ul>' +
+
+      (suyas.length
+        ? '<ul class="lista-campanas">' + suyas.map(k =>
+            '<li>' +
+              '<span class="nombre">' + esc(k.nombre) + '</span>' +
+              '<span class="badge">' + k.vods + ' VOD</span>' +
+              '<select data-pestado="' + k.id + '" aria-label="Estado de ' + esc(k.nombre) + '">' +
+                ['activa', 'pausada', 'terminada'].map(e =>
+                  '<option value="' + e + '"' + (k.estado === e ? ' selected' : '') + '>' + e + '</option>'
+                ).join('') +
+              '</select>' +
+              '<button class="chip" data-pborrar-campana="' + k.id + '" ' +
+                'aria-label="Borrar la campaña ' + esc(k.nombre) + '">Borrar</button>' +
+            '</li>'
+          ).join('') + '</ul>'
+        : '<p class="reason" style="margin:var(--s3) 0 0">Sin campañas todavia.</p>') +
+
+      '<div class="fila-nueva" style="margin-top:var(--s3)">' +
+        '<input id="nueva-campana-' + c.id + '" type="text" maxlength="80" ' +
+          'placeholder="Nombre de la campaña" autocomplete="off" ' +
+          'aria-label="Campaña nueva para ' + esc(c.nombre) + '">' +
+        '<button class="chip" data-pcrear-campana="' + c.id + '">Añadir campaña</button>' +
+      '</div>' +
+
+      '<div class="chips" style="margin-top:var(--s3)">' +
+        '<button class="chip" data-parchivar="' + c.id + '" data-valor="' + (c.archivado ? '0' : '1') + '">' +
+          (c.archivado ? 'Desarchivar' : 'Archivar') +
+        '</button>' +
+        '<button class="chip" data-pborrar-cliente="' + c.id + '">Borrar</button>' +
+      '</div>' +
+    '</div></article>';
+  }).join('');
+
+  const pendientes = (sinCuenta.length || sinVod.length)
+    ? '<article class="card"><div class="body">' +
+        '<h3 class="t">Sin asignar</h3>' +
+
+        (sinCuenta.length
+          ? '<p class="reason">Cuentas</p><ul class="lista-campanas">' + sinCuenta.map(x =>
+              '<li>' +
+                '<span class="nombre">' + esc(x.id) + (x.tiktok ? ' (@' + esc(x.tiktok) + ')' : '') + '</span>' +
+                '<select data-pasignar-cuenta="' + esc(x.id) + '" aria-label="Cliente de ' + esc(x.id) + '">' +
+                  '<option value="">Sin asignar</option>' +
+                  d.clientes.filter(c => !c.archivado).map(c =>
+                    '<option value="' + c.id + '">' + esc(c.nombre) + '</option>'
+                  ).join('') +
+                '</select>' +
+              '</li>'
+            ).join('') + '</ul>'
+          : '') +
+
+        (sinVod.length
+          ? '<p class="reason" style="margin-top:var(--s3)">Videos de origen</p>' +
+            '<ul class="lista-campanas">' + sinVod.map(v =>
+              '<li>' +
+                '<span class="nombre">' + esc(v.title.slice(0, 44)) + '</span>' +
+                '<select data-pasignar-vod="' + esc(v.sourceId) + '" aria-label="Campaña de ' + esc(v.title) + '">' +
+                  opcionesCampana(d.campanas, null) +
+                '</select>' +
+              '</li>'
+            ).join('') + '</ul>'
+          : '') +
+      '</div></article>'
+    : '';
+
+  return nuevo + fichas + pendientes +
+    '<article class="card flat"><div class="body">' +
+      '<details class="nota"><summary>Como se reparte cada cosa</summary>' +
+        '<p>Las <b>cuentas</b> cuelgan del cliente y las <b>campañas</b> agrupan sus videos. ' +
+        'Es a proposito: una cuenta de TikTok sigue siendo suya entre lanzamientos, y colgarla ' +
+        'de la campaña obligaria a volver a autorizarla cada vez que empieza una nueva.</p>' +
+        '<p>Borrar un cliente <b>no borra sus cuentas</b>: quedan sin asignar y conservan su ' +
+        'permiso de TikTok. Los videos tampoco se borran.</p>' +
+      '</details>' +
+    '</div></article>';
+}
+
+// --- Vista: cuentas -------------------------------------------------------
+
+function vistaPlataformas() {
+  const d = state.plataformas;
+  if (!d) return esqueleto(3, false);
+
+  const punto = { conectado: 'si', 'sin-conectar': 'no', 'no-disponible': 'nada' };
+  const etiqueta = { conectado: 'conectado', 'sin-conectar': 'sin conectar', 'no-disponible': 'aun no se puede' };
+  const clase = { conectado: 'ok', 'sin-conectar': '', 'no-disponible': '' };
+
+  return d.plataformas.map(p =>
+    '<article class="card"><div class="body">' +
+      '<div class="plat">' +
+        '<span class="punto-estado ' + punto[p.estado] + '"></span>' +
+        '<span class="nombre">' + esc(p.nombre) + '</span>' +
+        '<span class="badge ' + clase[p.estado] + '">' + etiqueta[p.estado] + '</span>' +
+      '</div>' +
+
+      (p.estado === 'conectado'
+        ? '<div class="stats" style="margin-top:var(--s3)">' +
+            '<div><b>' + p.cuentas + '</b><span>Cuentas</span></div>' +
+            '<div><b>' + p.publicaciones + '</b><span>Subidos</span></div>' +
+            '<div><b>' + hora(p.ultima) + '</b><span>Ultimo</span></div>' +
+          '</div>'
+        : '') +
+
+      (p.nota ? '<p class="reason" style="margin:var(--s3) 0 0">' + esc(p.nota) + '</p>' : '') +
+
+    '</div></article>'
+  ).join('') + listaCuentas() +
+
+  '<article class="card flat"><div class="body">' +
+    '<details class="nota"><summary>Que pasa al enlazar una cuenta</summary>' +
+      '<p>El programa <b>nunca ve tu contraseña</b>. Al pulsar Enlazar se abre tiktok.com, ' +
+      'escribes la clave alli, y lo que vuelve es un permiso revocable desde los ajustes ' +
+      'de esa misma cuenta.</p>' +
+      '<p>Usa una <b>ventana de incognito</b> para cada cuenta. Si ya tienes otra sesion de ' +
+      'TikTok abierta, TikTok autorizara esa sin preguntarte cual.</p>' +
+      '<p><b>Comprobar</b> pregunta a TikTok por el perfil. Sirve para ver que el permiso ' +
+      'sigue vivo y para refrescar el @. No dice si la app paso la auditoria: eso solo lo ' +
+      'revela intentar una publicacion directa.</p>' +
+    '</details>' +
+  '</div></article>';
+}
+
+/*
+ * Una fila por cuenta, con su estado de enlace.
+ *
+ * Se apoya en state.proyectos y no en /api/plataformas porque aquel resumen
+ * cuenta publicaciones por proveedor y no sabe que cuenta es cual. Las dos se
+ * piden juntas al entrar en la seccion.
+ */
+function listaCuentas() {
+  const d = state.proyectos;
+  if (!d) return '';
+
+  const nombre = {};
+  for (const c of d.clientes) nombre[c.id] = c.nombre;
+
+  /*
+   * El punto verde es "entra en el reparto", no "tiene TikTok enlazado".
+   *
+   * Antes marcaba el enlace con TikTok, y eso solo significa algo cuando se
+   * publica por la API propia. Con upload-post, doce cuentas perfectamente
+   * utilizables salian en gris y con un boton de "Enlazar" que no hacia falta,
+   * mientras que lo unico que de verdad decide si reciben videos (estar activa)
+   * no se veia por ninguna parte.
+   */
+  // El proveedor viene de /api/plataformas, que esta vista pide a la vez que
+  // /api/proyectos. De ahi que se lea de state.plataformas y no de la variable d.
+  const porUploadPost = (state.plataformas?.proveedor ?? 'upload-post') === 'upload-post';
+  const activas = d.cuentas.filter(c => c.activa).length;
+
+  /*
+   * A partir del umbral, la tarjeta cruza las dos columnas.
+   *
+   * Cada fila lleva hasta cinco botones. En media columna no caben y
+   * "Desenlazar" se iba a una segunda linea en CADA fila, asi que cincuenta
+   * cuentas eran cien renglones. Con pocas cuentas las filas son cortas y
+   * ocupar el ancho entero solo dejaria hueco a la derecha.
+   */
+  const anchoEntero = d.cuentas.length >= CUENTAS_UMBRAL;
+
+  return '<article class="card' + (anchoEntero ? ' ancho' : '') + '"><div class="body">' +
+    '<h3 class="t">Cuentas</h3>' +
+    /*
+     * Cuantas maneja el programa, aqui mismo.
+     *
+     * Antes el numero se fijaba una sola vez por consola, al crear las cuentas,
+     * y cambiarlo pedia una terminal en el ordenador de casa.
+     */
+    /*
+     * Cuantas caben todavia, antes de ofrecer crear.
+     *
+     * El desplegable ofrecia crear hasta diez sin mirar el tope, y el
+     * servidor las rechazaba despues con un error. Decir el hueco que queda
+     * ANTES de pulsar evita el viaje entero, y de paso recuerda que el limite
+     * no lo pone este programa sino el plan contratado.
+     */
+    (() => {
+      // state.settings es la respuesta entera de /api/settings; los ajustes
+      // van dentro, en .settings.
+      const tope = state.settings?.settings?.maxCuentas;
+      if (!Number.isFinite(tope)) return '';
+      const libres = Math.max(0, tope - d.cuentas.length);
+      return '<p class="reason" style="margin:0 0 var(--s3)">' +
+        d.cuentas.length + ' de ' + tope + ' cuentas de tu plan. ' +
+        (libres === 0
+          ? 'No queda hueco: sube de plan en upload-post y elige el nuevo en Horarios.'
+          : 'Te quedan ' + plural(libres, 'cuenta') + ' por crear.') +
+      '</p>';
+    })() +
+
+    '<div class="linea ancha" style="margin-bottom:var(--s4)">' +
+      '<span>Añadir cuentas</span>' +
+      '<span style="display:flex;gap:8px;align-items:center">' +
+        '<select id="cuantas-cuentas">' +
+          /*
+           * Solo se ofrecen cantidades que caben.
+           *
+           * Ofrecer "10" con dos huecos libres es ofrecer un error. Si no
+           * cabe ninguna, queda la opcion de 1 y el servidor da el mensaje
+           * con el nombre del plan, que es donde se explica que hacer.
+           */
+          [1, 2, 3, 5, 10]
+            .filter((n, i) => i === 0 ||
+              n <= Math.max(1, (state.settings?.settings?.maxCuentas ?? 0) - d.cuentas.length))
+            .map(n => '<option value="' + n + '">' + n + '</option>').join('') +
+        '</select>' +
+        '<button class="chip" id="crear-cuentas">Crear</button>' +
+      '</span>' +
+    '</div>' +
+    '<p class="reason" style="margin-top:0">' +
+      (porUploadPost
+        ? 'Se publica por <b>upload-post</b>. Reciben videos las <b>' + activas + '</b> cuentas ' +
+          'activas, y cada una necesita un perfil con ese mismo nombre dado de alta alli. ' +
+          'Pausa las que no tengan perfil o fallaran una por una.'
+        : 'Se publica por la <b>API de TikTok</b>. Solo reciben videos las cuentas activas ' +
+          'que ademas hayan autorizado la app.') +
+    '</p>' +
+    /*
+     * Herramientas solo a partir del umbral. Ver CUENTAS_UMBRAL.
+     */
+    (d.cuentas.length >= CUENTAS_UMBRAL ? herramientasCuentas(d.cuentas, d.clientes ?? []) : '') +
+    (d.cuentas.length >= CUENTAS_UMBRAL ? loteCuentas(d.clientes ?? []) : '') +
+    (() => {
+      const visibles = d.cuentas.length >= CUENTAS_UMBRAL
+        ? cuentasVisibles(d.cuentas)
+        : d.cuentas;
+      if (visibles.length === 0) {
+        return '<p class="reason" style="margin:var(--s3) 0 0">' +
+          'Ninguna cuenta con esos filtros.</p>';
+      }
+      const conCasilla = d.cuentas.length >= CUENTAS_UMBRAL;
+      const pintadas = visibles.slice(0, CUENTAS_MAX_FILAS);
+      const ocultas = visibles.length - pintadas.length;
+      return (conCasilla && visibles.length > 1
+          ? '<p class="reason" style="margin:var(--s3) 0 0">' +
+            visibles.length + ' de ' + d.cuentas.length + '. ' +
+            // "Marcar las N" marca TODAS las que pasan el filtro, no solo las
+            // que caben en pantalla: lo que se ha filtrado es lo que se
+            // quiere, y obligar a desplegarlas para poder marcarlas seria
+            // deshacer el recorte.
+            '<button class="enlace" data-ctodas>Marcar las ' + visibles.length + '</button></p>'
+          : '') +
+        '<ul class="lista-campanas">' +
+          pintadas.map(c => filaCuenta(c, nombre, porUploadPost, conCasilla)).join('') +
+        '</ul>' +
+        (ocultas > 0
+          ? '<p class="reason" style="margin:var(--s3) 0 0">' +
+            'Y ' + plural(ocultas, 'cuenta') + ' mas. Busca o filtra para verlas.</p>'
+          : '');
+    })() +
+  '</div></article>';
+}
+
+// --- Vista: metricas ------------------------------------------------------
+
+function vistaMetricas() {
+  const m = state.metrics;
+  if (!m) return esqueleto(2, true);
+
+  if (m.published === 0) {
+    return '<div class="card"><div class="body">' +
+      '<p class="hook">Todavia no hay nada publicado</p>' +
+      '<p class="reason" style="margin-bottom:0">Esto se llena cuando el programa empiece a subir videos. ' +
+      'Enlaza una cuenta en la seccion Cuentas para empezar.</p>' +
+    '</div></div>' +
+    '<div class="card"><div class="body">' +
+      '<div class="chips">' +
+        '<button class="chip primario" data-run="metrics">Actualizar</button>' +
+      '</div>' +
+    '</div></div>';
+  }
+
+  /*
+   * Publicado pero sin medir: hay que decir POR QUE.
+   *
+   * Sin esto la seccion enseña una tabla con ceros en todas las filas, que se
+   * lee como "tus videos no los ve nadie" cuando en realidad significa "aun no
+   * hemos podido preguntarlo". Son cosas opuestas y la diferencia importa.
+   *
+   * Las dos causas reales, en orden de probabilidad:
+   *
+   *  1. Falta el permiso video.list. Las autorizaciones actuales piden
+   *     user.info.basic, video.upload y video.publish. Leer cifras necesita
+   *     ademas video.list, y un permiso no se amplia solo: hay que añadirlo en
+   *     el portal y volver a autorizar cada cuenta.
+   *  2. El video sigue en la bandeja de entrada. Mientras nadie lo publique
+   *     desde el movil no existe como publicacion y no tiene estadisticas.
+   */
+  const sinMedir = m.snapshots === 0;
+
+  return (sinMedir
+    ? '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
+        '<b>Hay ' + m.published + ' video(s) entregados pero ninguna medicion.</b> ' +
+        'Los ceros de abajo no significan que nadie los vea: significan que todavia ' +
+        'no hemos podido preguntarle a TikTok.' +
+      '</div>' +
+      '<details class="nota" style="margin-top:var(--s3)"><summary>Que falta para tener cifras</summary>' +
+        '<p><b>El permiso de lectura.</b> Las cuentas estan autorizadas para publicar, ' +
+        'pero no para leer estadisticas. Eso es otro permiso (<i>video.list</i>) que hay ' +
+        'que añadir en el portal de TikTok y despues volver a autorizar cada cuenta: ' +
+        'un permiso ya concedido no se amplia solo.</p>' +
+        '<p><b>Y que esten publicados de verdad.</b> Un video que sigue esperando en la ' +
+        'bandeja de entrada del movil no es una publicacion todavia, asi que no tiene ' +
+        'cifras que consultar.</p>' +
+      '</details>' +
+    '</div></div>'
+    : '') +
+    '<div class="card"><div class="stats">' +
+      '<div><b>' + m.published + '</b><span>Subidos</span></div>' +
+      '<div><b>' + m.snapshots + '</b><span>Mediciones</span></div>' +
+      '<div><b>' + hora(m.lastCapture) + '</b><span>Ultima</span></div>' +
+    '</div></div>' +
+    '<div class="card"><table>' +
+      '<tr><th>Video</th><th>Nota</th><th>Veces</th><th>Vistas</th></tr>' +
+      m.byClip.map(c =>
+        // El titulo del VOD debajo del clip: sin el, dos 'clip-01' de VODs
+        // distintos se leen como el mismo video.
+        '<tr><td>' + esc(c.clipId) +
+          (c.fuente ? '<br><span class="sub">' + esc(String(c.fuente).slice(0, 30)) + '</span>' : '') +
+        '</td>' +
+        '<td class="score' + (c.score >= 60 ? ' alto' : '') + '">' + c.score + '</td>' +
+        '<td>' + c.posts + '</td><td>' + c.views.toLocaleString('es') + '</td></tr>'
+      ).join('') +
+    '</table></div>';
+}
+
+// --- Pintado --------------------------------------------------------------
+
+function render() {
+  renderTabs();
+  const seccion = SECCION_DE[state.view] ?? 'inicio';
+  const vistas = SECCIONES[seccion].vistas;
+
+  /*
+   * El titulo es el de la pestaña cuando la seccion tiene varias.
+   *
+   * Poner siempre "Ajustes" dejaria cinco pantallas distintas con el mismo
+   * encabezado, que es como no tener encabezado.
+   */
+  const etiqueta = vistas.find(([v]) => v === state.view)?.[1];
+  document.getElementById('title').textContent =
+    state.view === 'vod'
+      // El detalle no esta en la lista de vistas de la seccion: su titulo es
+      // el del propio video, que es lo que estas mirando.
+      ? (state.vod?.title ?? 'Video')
+      : (vistas.length > 1 ? SECCIONES[seccion].titulo + ' / ' + etiqueta : SECCIONES[seccion].titulo);
+
+  for (const b of document.querySelectorAll('nav button[data-seccion]')) {
+    b.setAttribute('aria-current', String(b.dataset.seccion === seccion));
+  }
+
+  // Pendientes de revisar, en el propio menu. Con el menu cerrado ya no se ve
+  // el contador, asi que sin esto no hay forma de saber que hay trabajo.
+  const pend = document.getElementById('pend');
+  const n = state.overview?.clips.pending ?? state.counts.pending;
+  pend.hidden = !n;
+  if (n) {
+    /*
+     * Animar solo el cambio, no el repintado.
+     *
+     * render() corre cada vez que llega un aviso del servidor, casi siempre con
+     * el mismo numero. El valor anterior se guarda en el propio nodo para no
+     * llevar otra variable de estado por esto.
+     *
+     * El reflow forzado (offsetWidth) es lo que permite repetir la animacion:
+     * sin el, quitar y poner la clase en el mismo fotograma no reinicia nada
+     * porque el navegador agrupa los dos cambios y no ve diferencia.
+     */
+    const antes = pend.dataset.n;
+    pend.textContent = n;
+    if (antes !== undefined && antes !== String(n)) {
+      pend.classList.remove('cambia');
+      void pend.offsetWidth;
+      pend.classList.add('cambia');
+    }
+    pend.dataset.n = String(n);
+  }
+
+  const view = document.getElementById('view');
+  // La vista en el propio contenedor: hay pantallas que necesitan otra rejilla
+  // y el CSS no puede saber cual se esta pintando de otra forma.
+  view.className = 'vista-' + state.view;
+
+  /*
+   * Cambiar de pantalla empieza arriba.
+   *
+   * render() tambien corre al refrescar datos SIN cambiar de vista -- cada
+   * aviso del servidor dispara uno -- y ahi subir seria intolerable: estas a
+   * media lista de clips y la pagina salta al principio sola. Por eso se
+   * compara con la ultima pintada y solo se sube cuando de verdad cambio.
+   */
+  if (render.ultima !== state.view) {
+    render.ultima = state.view;
+    scrollTo({ top: 0, behavior: 'instant' });
+    /*
+     * El desvanecido de entrada, reiniciado a mano.
+     *
+     * Quitar y poner la clase en el mismo fotograma no reinicia nada: el
+     * navegador agrupa los dos cambios y no ve diferencia. El reflow forzado
+     * (offsetWidth) es lo que separa los dos estados. Es el mismo truco que
+     * usa el contador de pendientes del menu.
+     */
+    view.classList.remove('cambia');
+    void view.offsetWidth;
+    view.classList.add('cambia');
+  }
+
+  /*
+   * Pestañas de la seccion, solo si hay mas de una.
+   *
+   * Se pintan dentro de #view y no en el encabezado para que hereden el ancho
+   * de la columna de contenido: en el encabezado se irian al borde de la
+   * pantalla y quedarian lejos de lo que cambian.
+   */
+  // En el detalle no hay pestañas: no es una vista hermana de las de Inicio,
+  // esta por debajo, y el rastro de migas ya dice donde estas.
+  const subtabs = vistas.length > 1 && state.view !== 'vod'
+    ? '<div class="subtabs" role="tablist">' + vistas.map(([v, etiq]) =>
+        '<button class="subtab" role="tab" aria-selected="' + (v === state.view) + '"' +
+        ' data-subvista="' + v + '">' + etiq + '</button>').join('') + '</div>'
+    : '';
+
+  if (state.view === 'proceso') view.innerHTML = vistaProceso();
+  if (state.view === 'clips') view.innerHTML = vistaClips();
+  if (state.view === 'cola') view.innerHTML = vistaCola();
+  if (state.view === 'registro') view.innerHTML = vistaRegistro();
+  if (state.view === 'flujo') view.innerHTML = vistaFlujo();
+  if (state.view === 'ajustes') view.innerHTML = vistaAjustes();
+  if (state.view === 'proyectos') view.innerHTML = vistaProyectos();
+  if (state.view === 'plataformas') view.innerHTML = vistaPlataformas();
+  if (state.view === 'metricas') view.innerHTML = vistaMetricas();
+  if (state.view === 'vod') view.innerHTML = vistaVod();
+
+  /*
+   * Una linea al entrar que diga que es esta pantalla.
+   *
+   * El titulo de la cabecera dice "Agenda" o "Revisar", y eso no basta para
+   * quien abre el panel por primera vez: un cliente que entra a aprobar sus
+   * videos no sabe si "Agenda" son sus citas o lo que esta por salir.
+   *
+   * Va dentro de #view y no en la cabecera porque la cabecera es estrecha y
+   * fija, y aqui hereda el ancho del contenido.
+   */
+  const intro = INTROS[state.view];
+  if (intro) {
+    view.insertAdjacentHTML('afterbegin',
+      '<p class="intro ancho">' + esc(intro) + '</p>');
+  }
+
+  if (subtabs !== '') view.insertAdjacentHTML('afterbegin', subtabs);
+
+  pintarAvisos();
+
+  /*
+   * La linea de atajos solo cuando hay algo que decidir.
+   *
+   * Con la lista vacia salia "0 videos" y, al lado, como aprobar y rechazar
+   * con el teclado. Debajo de un "Todo revisado" eso son instrucciones para
+   * un trabajo que no existe, y encima la unica linea de texto suelta de la
+   * pantalla, flotando sin caja.
+   */
+  const hint = document.getElementById('hint');
+  const hayClips = state.view === 'clips' && state.clips.length > 0;
+  hint.className = 'hint' + (hayClips ? ' kbd' : '');
+  hint.textContent = hayClips ? plural(state.clips.length, 'video') : '';
+
+  if (state.view === 'clips') { lazyLoadVideos(); pintarSeleccion(); }
+  /*
+   * La vista previa necesita dos cosas despues de pintar el HTML.
+   *
+   * El texto de la publicacion se calcula en JavaScript (lleva deduplicado de
+   * etiquetas y limpieza), asi que no cabe en la cadena del render. Y el video
+   * usa el mismo cargado diferido que las tarjetas de Revisar: el src se pone
+   * al entrar en pantalla, no antes, para no descargar un MP4 cada vez que se
+   * repinta por tocar una perilla.
+   */
+  if (state.view === 'ajustes') {
+    const destino = document.getElementById('pv-texto');
+    if (destino && state.ajustes?.muestra) {
+      destino.textContent = textoPublicacion(state.ajustes.ajustes, state.ajustes.muestra);
+    }
+    lazyLoadVideos();
+  }
+  if (state.openLog) pintarLog(state.openLog);
+
+  /*
+   * El ajuste que pidio el buscador: se lleva a la vista y se resalta.
+   *
+   * Se consume al usarlo (state.resaltar = null) para que un refresco
+   * posterior -- y llegan solos cada vez que el servidor avisa de algo -- no
+   * vuelva a saltar a esa perilla mientras tocas otra.
+   */
+  if (state.resaltar) {
+    const campo = document.querySelector(
+      '[data-ajuste="' + CSS.escape(state.resaltar) + '"], [data-set="' + CSS.escape(state.resaltar) + '"]',
+    );
+    state.resaltar = null;
+    if (campo) {
+      const fila = campo.closest('.linea') ?? campo;
+      fila.classList.add('resaltado');
+      fila.scrollIntoView({ block: 'center', behavior: comoDesplazar() });
+      campo.focus({ preventScroll: true });
+      // El resalte se va solo: dejarlo puesto convertiria una ayuda para
+      // encontrar algo en una marca permanente sin significado.
+      setTimeout(() => fila.classList.remove('resaltado'), 2200);
+    }
+  }
+}
+
+// --- Video diferido -------------------------------------------------------
+
+// Carga el video solo cuando su tarjeta esta cerca de la pantalla.
+//
+// Se usa una comprobacion sobre scroll en lugar de IntersectionObserver a
+// proposito. IO es mas elegante, pero depende de que el navegador produzca
+// frames: en entornos sin composicion real (renderizado headless, pestañas en
+// segundo plano) el callback no llega nunca y ningun video se carga. Medir la
+// posicion a mano son diez lineas y funciona siempre.
+const MARGIN = 300;
+
+function loadVisibleVideos() {
+  for (const v of document.querySelectorAll('video[data-src]')) {
+    if (v.src) continue;
+    const r = v.getBoundingClientRect();
+    if (r.bottom > -MARGIN && r.top < innerHeight + MARGIN) {
+      v.src = v.dataset.src;
+      v.preload = 'metadata';
+    }
+  }
+}
+
+function lazyLoadVideos() {
+  loadVisibleVideos();
+  // Dos videos sonando a la vez hacen la revision inutil.
+  for (const v of document.querySelectorAll('video')) {
+    v.addEventListener('play', () => {
+      for (const other of document.querySelectorAll('video')) {
+        if (other !== v) other.pause();
+      }
+    });
+  }
+}
+
+addEventListener('scroll', loadVisibleVideos, { passive: true });
+addEventListener('resize', loadVisibleVideos);
+
+// --- Acciones -------------------------------------------------------------
+
+async function decide(card, status) {
+  const caption = card.querySelector('.caption')?.value ?? '';
+  const tags = (card.querySelector('.tags')?.value ?? '')
+    .split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+
+  await fetch('/api/clips/' +
+    encodeURIComponent(card.dataset.source) + '/' + encodeURIComponent(card.dataset.clip), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ status, caption, hashtags: tags }),
+  });
+
+  /*
+   * La tarjeta decidida se va hacia un lado, no se apaga.
+   *
+   * Desvanecerse no dice nada: aprobar y descartar se veian exactamente igual,
+   * asi que no habia forma de saber que habia registrado el panel salvo
+   * esperar a que el contador cambiara. Saliendo hacia la derecha lo aprobado y
+   * hacia la izquierda lo descartado, la direccion confirma la decision antes
+   * de que llegue ninguna respuesta.
+   *
+   * Quien pidio menos movimiento no ve el desplazamiento: la regla global deja
+   * la animacion en 0,01 ms. Por eso el refresco NO espera a que termine la
+   * animacion, sino un tiempo fijo corto: si esperase al evento de fin, con
+   * movimiento reducido llegaria igual y con animaciones desactivadas del todo
+   * en el navegador no llegaria nunca.
+   */
+  card.style.setProperty('--sale', status === 'approved' ? '18px' : '-18px');
+  card.style.animation = 'resuelta var(--m-rapido) var(--e-salida) forwards';
+  setTimeout(refrescar, 180);
+}
+
+async function lanzar(kind, params) {
+  try {
+    await api('/api/jobs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind, params: params ?? {} }),
+    });
+  } catch (error) {
+    alert(error.message);
+  }
+  await refrescar();
+}
+
+async function pintarLog(id) {
+  const el = document.getElementById('log-' + id);
+  if (!el) return;
+  try {
+    const job = await api('/api/jobs/' + id);
+    el.textContent = job.lines.join('\\n') || '(sin salida)';
+    el.scrollTop = el.scrollHeight;
+  } catch {
+    el.textContent = '(no se pudo leer la salida)';
+  }
+}
+
+document.addEventListener('click', async e => {
+  if (e.target.closest('#menu')) { menu(true); return; }
+  if (e.target.id === 'fondo') { menu(false); return; }
+
+  if (e.target.closest('#campana')) { abrirAvisos(!state.avisos); return; }
+
+  /*
+   * Un clic fuera cierra el panel de avisos.
+   *
+   * Sin velo de fondo a proposito: el velo del menu oscurece la pagina entera,
+   * y eso para una lista de seis lineas es desproporcionado. La contrapartida
+   * es que hay que cerrar a mano, y este es ese "a mano". Va antes que todo lo
+   * demas para que el clic que cierra tambien haga lo que sea que pulsaste.
+   */
+  if (state.avisos && !e.target.closest('#avisos')) abrirAvisos(false);
+
+  /*
+   * El menu lleva a secciones; dentro de una seccion se recuerda donde estabas.
+   *
+   * Sin la memoria, quien mira Resultados y va a Ajustes vuelve a Agenda y cae
+   * otra vez en Calendario. Con cinco pestañas dentro de Ajustes eso se nota.
+   */
+  // Abrir un video por su nombre, desde la lista de Inicio.
+  const vod = e.target.closest('[data-vod]');
+  if (vod) { abrirVod(vod.dataset.vod); return; }
+
+  const nav = e.target.closest('nav button[data-seccion]');
+  if (nav) {
+    const id = nav.dataset.seccion;
+    const vistas = SECCIONES[id].vistas;
+    const recordada = state.ultimaVista[id];
+    state.view = vistas.some(([v]) => v === recordada) ? recordada : vistas[0][0];
+    state.openLog = null;
+    menu(false);
+    refrescar();
+    return;
+  }
+
+  const subtab = e.target.closest('[data-subvista]');
+  if (subtab) {
+    state.view = subtab.dataset.subvista;
+    state.ultimaVista[SECCION_DE[state.view]] = state.view;
+    state.openLog = null;
+    refrescar();
+    return;
+  }
+
+  // Botones que solo llevan a otra seccion, como el de "Siguiente paso" o una
+  // fila de avisos. Si el clic vino del panel de avisos, ese panel se cierra:
+  // lo pulsaste para ir a algun sitio, no para dejarlo abierto encima.
+  const ir = e.target.closest('[data-ir]');
+  if (ir) {
+    if (ir.closest('#avisos')) abrirAvisos(false);
+    state.view = ir.dataset.ir;
+    // Para que al volver a esa seccion caiga donde el atajo te dejo.
+    state.ultimaVista[SECCION_DE[state.view]] = state.view;
+    state.openLog = null;
+    refrescar();
+    return;
+  }
+
+  const tab = e.target.closest('.tab');
+  if (tab) {
+    // Cambiar de pestaña vacia la seleccion: lo marcado en Pendientes no
+    // tiene sentido en Aprobados, donde la unica accion es devolverlos.
+    state.filter = tab.dataset.filter;
+    state.sel.clear();
+    state.foco = 0;
+    refrescar();
+    return;
+  }
+
+  // --- Proyectos ---------------------------------------------------------
+
+  const crearCliente = e.target.closest('[data-pcrear-cliente]');
+  if (crearCliente) {
+    const input = document.getElementById('nuevo-cliente');
+    await proyectoAccion({ accion: 'crear-cliente', nombre: input.value }, 'Cliente creado');
+    return;
+  }
+
+  const crearCampana = e.target.closest('[data-pcrear-campana]');
+  if (crearCampana) {
+    const id = crearCampana.dataset.pcrearCampana;
+    const input = document.getElementById('nueva-campana-' + id);
+    await proyectoAccion({ accion: 'crear-campana', clienteId: id, nombre: input.value }, 'Campaña creada');
+    return;
+  }
+
+  const archivar = e.target.closest('[data-parchivar]');
+  if (archivar) {
+    await proyectoAccion(
+      { accion: 'editar-cliente', id: archivar.dataset.parchivar, archivado: archivar.dataset.valor === '1' },
+      archivar.dataset.valor === '1' ? 'Cliente archivado' : 'Cliente recuperado',
+    );
+    return;
+  }
+
+  const borrarCliente = e.target.closest('[data-pborrar-cliente]');
+  if (borrarCliente) {
+    // Se avisa de lo que NO se borra, que es lo que la gente teme al pulsar.
+    if (!confirm('Borrar este cliente. Sus cuentas quedan sin asignar y conservan su permiso de TikTok; sus videos tampoco se borran. Seguir?')) return;
+    await proyectoAccion({ accion: 'borrar-cliente', id: borrarCliente.dataset.pborrarCliente }, 'Cliente borrado');
+    return;
+  }
+
+  const borrarCampana = e.target.closest('[data-pborrar-campana]');
+  if (borrarCampana) {
+    if (!confirm('Borrar esta campaña. Sus videos quedan sin asignar, no se borran. Seguir?')) return;
+    await proyectoAccion({ accion: 'borrar-campana', id: borrarCampana.dataset.pborrarCampana }, 'Campaña borrada');
+    return;
+  }
+
+  // --- Cuentas -----------------------------------------------------------
+
+  const sacar = e.target.closest('[data-psacar]');
+  if (sacar) {
+    await proyectoAccion(
+      { accion: 'asignar-cuenta', id: sacar.dataset.psacar, destino: null },
+      'Cuenta sin asignar',
+    );
+    return;
+  }
+
+  const enlazar = e.target.closest('[data-cenlazar]');
+  if (enlazar) {
+    try {
+      const r = await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accion: 'enlazar', id: enlazar.dataset.cenlazar }),
+      });
+      /*
+       * Se abre en otra pestaña, no se navega.
+       *
+       * Navegar dejaria el panel atras y, al volver TikTok a la pagina de
+       * retorno, el usuario se quedaria en ella sin forma obvia de regresar.
+       */
+      window.open(r.url, '_blank', 'noopener');
+      avisar('Autoriza en la pestaña nueva. Usa incognito si tienes otra sesion abierta.');
+    } catch (err) {
+      avisar(err.message);
+    }
+    return;
+  }
+
+  const revisarCuenta = e.target.closest('[data-crevisar]');
+  if (revisarCuenta) {
+    try {
+      const r = await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accion: 'revisar', id: revisarCuenta.dataset.crevisar }),
+      });
+      avisar('@' + r.username + ' responde. Maximo ' + r.maxDurationSec + 's por video.');
+      refrescar();
+    } catch (err) {
+      avisar(err.message);
+    }
+    return;
+  }
+
+  /*
+   * Pausar y activar comparten manejador: cambia el verbo, no el gesto.
+   *
+   * Pausar no pide confirmacion porque no destruye nada y se deshace con el
+   * boton de al lado. Lo ya programado sigue su curso; solo deja de entrar en
+   * los repartos siguientes, y eso lo dice la respuesta del servidor.
+   */
+  const quitarVod = e.target.closest('[data-quitar-vod]');
+  if (quitarVod) {
+    const id = quitarVod.dataset.quitarVod;
+    if (!confirm('Quitar ' + id + ' de la lista. Solo se puede porque no llego a dar ningun momento. Seguir?')) return;
+    try {
+      const r = await api('/api/sources/' + encodeURIComponent(id), { method: 'DELETE' });
+      avisar(r.mensaje);
+      refrescar();
+    } catch (err) { avisar(err.message); }
+    return;
+  }
+
+  if (e.target.id === 'crear-cuentas') {
+    const cuantas = Number(document.getElementById('cuantas-cuentas').value);
+    try {
+      const r = await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accion: 'crear', cuantas }),
+      });
+      avisar(r.mensaje);
+      refrescar();
+    } catch (err) { avisar(err.message); }
+    return;
+  }
+
+  const borrarCuenta = e.target.closest('[data-cborrar]');
+  if (borrarCuenta) {
+    const id = borrarCuenta.dataset.cborrar;
+    // Borrar una cuenta no se deshace, a diferencia de pausarla.
+    if (!confirm('Borrar ' + id + ' para siempre. Si solo quieres dejar de usarla, Pausar la conserva. Seguir?')) return;
+    try {
+      const r = await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accion: 'borrar', id }),
+      });
+      avisar(r.mensaje);
+      refrescar();
+    } catch (err) { avisar(err.message); }
+    return;
+  }
+
+  const pausar = e.target.closest('[data-cpausar]');
+  const activar = e.target.closest('[data-cactivar]');
+  if (pausar || activar) {
+    const id = pausar ? pausar.dataset.cpausar : activar.dataset.cactivar;
+    try {
+      const r = await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accion: pausar ? 'pausar' : 'activar', id }),
+      });
+      avisar(r.mensaje);
+      refrescar();
+    } catch (err) {
+      avisar(err.message);
+    }
+    return;
+  }
+
+  const olvidar = e.target.closest('[data-colvidar]');
+  if (olvidar) {
+    if (!confirm('Desenlazar esta cuenta. Tendras que volver a autorizarla en tiktok.com para publicar. Seguir?')) return;
+    try {
+      const r = await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accion: 'olvidar', id: olvidar.dataset.colvidar }),
+      });
+      avisar(r.mensaje);
+      refrescar();
+    } catch (err) {
+      avisar(err.message);
+    }
+    return;
+  }
+
+  const btn = e.target.closest('[data-do]');
+  if (btn) { decide(btn.closest('.card'), btn.dataset.do); return; }
+
+  const log = e.target.closest('[data-log]');
+  if (log) {
+    state.openLog = state.openLog === log.dataset.log ? null : log.dataset.log;
+    render();
+    return;
+  }
+
+  const cancel = e.target.closest('[data-cancel]');
+  if (cancel) {
+    await fetch('/api/jobs/' + cancel.dataset.cancel + '/cancel', { method: 'POST' });
+    refrescar();
+    return;
+  }
+
+  const run = e.target.closest('[data-run]');
+  if (run && !run.disabled) {
+    const kind = run.dataset.run;
+    const params = {};
+    if (run.dataset.source) params.sourceId = run.dataset.source;
+    if (kind === 'metrics') params.mode = 'feedback';
+    lanzar(kind, params);
+    return;
+  }
+
+  if (e.target.closest('#drop')) { document.getElementById('file').click(); return; }
+
+  if (e.target.id === 'guardar') {
+    const valores = {};
+    for (const input of document.querySelectorAll('[data-set]')) {
+      valores[input.dataset.set] = Number(input.value);
+    }
+    guardarFlujo(valores);
+    return;
+  }
+
+  if (e.target.id === 'reset') { guardarFlujo(BASE); return; }
+
+  /*
+   * Atributo propio (data-ajuste) y no el data-set de Horarios.
+   *
+   * Las dos vistas no se ven nunca a la vez, asi que compartir atributo
+   * funcionaria hoy. Pero el recolector barre el documento entero, y el dia que
+   * alguien enseñe las dos cosas en una pantalla, guardar en una mandaria los
+   * campos de la otra a una ruta que no los conoce. Separarlos cuesta una
+   * palabra.
+   */
+  if (e.target.id === 'guardar-ajustes') {
+    const valores = {};
+    for (const input of document.querySelectorAll('[data-ajuste]')) {
+      const key = input.dataset.ajuste;
+      valores[key] = input.dataset.texto ? input.value
+        : BOOLEANOS.has(key) ? input.value === '1'
+        : Number(input.value);
+    }
+    guardarAjustes(valores);
+    return;
+  }
+
+  if (e.target.id === 'reset-ajustes') { guardarAjustes(BASE_CORTES); return; }
+
+  if (e.target.id === 'guardar-plantilla') { guardarPlantilla(); return; }
+
+  // Borrar antes que aplicar: la × vive DENTRO de la pastilla, asi que si se
+  // mirara primero data-plantilla, la cruz aplicaria en vez de borrar.
+  const borrar = e.target.closest('[data-borrar]');
+  if (borrar) {
+    const nombre = borrar.closest('.pastilla')?.querySelector('[data-plantilla]')?.textContent ?? 'esta plantilla';
+    if (!confirm('Borrar "' + nombre + '"? Los ajustes de ahora no cambian.')) return;
+    plantillaAccion('/api/plantillas/' + borrar.dataset.borrar, { method: 'DELETE' },
+      () => 'Plantilla borrada.');
+    return;
+  }
+
+  const aplicar = e.target.closest('[data-plantilla]');
+  if (aplicar && !aplicar.disabled) {
+    plantillaAccion('/api/plantillas/' + aplicar.dataset.plantilla + '/aplicar', { method: 'POST' },
+      d => 'Aplicada. ' + (d.ejemplo ? 'Saldrian unos ' + d.ejemplo.clips + ' momentos.' : ''));
+    return;
+  }
+
+  if (e.target.id === 'ingest') {
+    const input = document.getElementById('url');
+    const url = input.value.trim();
+    if (!url) { input.focus(); return; }
+    input.value = '';
+    lanzar('ingest', { url, campanaId: campanaElegida() });
+  }
+});
+
+// Los atajos de Revisar viven ahora en el bloque "Revisar en lote", al final
+// de este fichero: la A y la R comparten reglas con la seleccion multiple.
+
+document.addEventListener('input', e => {
+  if (!e.target.matches?.('.caption')) return;
+  const el = e.target.closest('.field').querySelector('.count');
+  el.textContent = e.target.value.length + ' / 150';
+  el.classList.toggle('over', e.target.value.length > 150);
+});
+
+// --- Subida de archivos ---------------------------------------------------
+
+/**
+ * Sube el archivo y arranca la transcripcion.
+ *
+ * Se usa XMLHttpRequest y no fetch por una razon concreta: fetch no informa del
+ * progreso de subida. Para un archivo de 900 MB, una barra parada en "subiendo"
+ * durante diez minutos es indistinguible de algo colgado.
+ *
+ * El cuerpo es el archivo en crudo y el nombre va en una cabecera. No hace
+ * falta multipart: solo se manda un archivo y el unico cliente es esta pagina.
+ */
+function subir(file) {
+  const barra = document.getElementById('barra');
+  const texto = document.getElementById('subiendo');
+  const relleno = barra.querySelector('i');
+  barra.hidden = false;
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.setRequestHeader('content-type', 'application/octet-stream');
+  // El nombre puede traer acentos o espacios, que no caben en una cabecera tal
+  // cual. Se codifica aqui y el servidor lo descodifica.
+  xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
+  const campana = campanaElegida();
+  if (campana) xhr.setRequestHeader('x-campana', campana);
+
+  const mb = b => (b / 1048576).toFixed(0);
+
+  xhr.upload.addEventListener('progress', ev => {
+    if (!ev.lengthComputable) return;
+    const pct = (ev.loaded / ev.total) * 100;
+    relleno.style.width = pct + '%';
+    texto.textContent = 'Subiendo ' + mb(ev.loaded) + ' de ' + mb(ev.total) + ' MB (' + pct.toFixed(0) + '%)';
+  });
+
+  xhr.addEventListener('load', () => {
+    barra.hidden = true;
+    if (xhr.status === 202) {
+      texto.textContent = 'Subido. Transcribiendo...';
+      refrescar();
+    } else {
+      let msg = 'HTTP ' + xhr.status;
+      try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+      texto.textContent = 'No se pudo subir: ' + msg;
+    }
+  });
+
+  xhr.addEventListener('error', () => {
+    barra.hidden = true;
+    texto.textContent = 'Se corto la conexion durante la subida.';
+  });
+
+  texto.textContent = 'Preparando ' + mb(file.size) + ' MB...';
+  xhr.send(file);
+}
+
+/*
+ * La vista previa se actualiza al tocar, antes de guardar.
+ *
+ * Es lo que la hace util: se prueba un color, se ve, y si no convence se
+ * prueba otro sin dejar rastro. Si solo reflejara lo guardado habria que
+ * confirmar cada tanteo, y ya no seria una prueba.
+ *
+ * Se escucha en 'input' y no en 'change' para que el selector de color
+ * responda mientras se arrastra, que es como se elige un color.
+ *
+ * Solo se repinta lo que cambia, no la pantalla entera: un render completo
+ * recrearia la etiqueta <video> y cortaria la reproduccion en cada tecla.
+ */
+/**
+ * Los ajustes tal y como estan AHORA en los controles, sin guardar.
+ *
+ * Parte de los guardados y pisa con lo que haya en pantalla, que es lo que se
+ * quiere previsualizar. Lo usan la vista previa y el arrastre.
+ */
+function ajustesDelFormulario() {
+  const a = { ...state.ajustes.ajustes };
+  for (const input of document.querySelectorAll('[data-ajuste]')) {
+    const k = input.dataset.ajuste;
+    a[k] = input.dataset.texto ? input.value
+      : BOOLEANOS.has(k) ? input.value === '1'
+      : Number(input.value);
+  }
+  return a;
+}
+
+function refrescarVistaPrevia() {
+  if (state.view !== 'ajustes' || !state.ajustes?.muestra) return;
+
+  const a = ajustesDelFormulario();
+
+  const texto = document.getElementById('pv-texto');
+  if (texto) texto.textContent = textoPublicacion(a, state.ajustes.muestra);
+
+  const marco = document.querySelector('.pv-marco');
+  if (!marco) return;
+  // Las dos capas por el mismo camino: crear, actualizar o quitar.
+  pintarCapa(marco, 'titulo', a, state.ajustes.muestra);
+  pintarCapa(marco, 'sub', a, state.ajustes.muestra);
+}
+
+document.addEventListener('input', e => {
+  if (e.target.closest('[data-ajuste]')) refrescarVistaPrevia();
+});
+
+document.addEventListener('change', e => {
+  if (e.target.closest('[data-ajuste]')) refrescarVistaPrevia();
+
+  // Desplegables de Proyectos. Van por 'change' y no por 'click' porque en el
+  // movil el selector nativo no emite clicks sobre las opciones.
+  const estado = e.target.closest('[data-pestado]');
+  if (estado) {
+    proyectoAccion({ accion: 'editar-campana', id: estado.dataset.pestado, estado: estado.value }, 'Estado guardado');
+    return;
+  }
+
+  const perfil = e.target.closest('[data-pperfil]');
+  if (perfil) {
+    // Cadena vacia = 'General'. El servidor la traduce a null, que es lo que
+    // devuelve al cliente a heredar del ajuste general.
+    proyectoAccion({
+      accion: 'editar-cliente',
+      id: perfil.dataset.pperfil,
+      [perfil.dataset.campo]: perfil.value === '' ? null : Number(perfil.value),
+    }, 'Ritmo guardado');
+    return;
+  }
+
+  const acuenta = e.target.closest('[data-pasignar-cuenta]');
+  if (acuenta) {
+    // Cadena vacia = "Sin asignar". El servidor la traduce a null; mandar la
+    // cadena tal cual rompería la clave foranea.
+    proyectoAccion({ accion: 'asignar-cuenta', id: acuenta.dataset.pasignarCuenta, destino: acuenta.value }, 'Cuenta asignada');
+    return;
+  }
+
+  const avod = e.target.closest('[data-pasignar-vod]');
+  if (avod) {
+    proyectoAccion({ accion: 'asignar-vod', id: avod.dataset.pasignarVod, destino: avod.value }, 'Video asignado');
+    return;
+  }
+
+  if (e.target.id !== 'file') return;
+  const file = e.target.files[0];
+  if (file) subir(file);
+  e.target.value = '';
+});
+
+// Arrastrar y soltar. El navegador abre el archivo si no se cancelan los dos
+// eventos, asi que hay que hacerlo tambien sobre el documento entero.
+for (const ev of ['dragover', 'drop']) {
+  document.addEventListener(ev, e => {
+    const drop = e.target.closest?.('#drop');
+    if (ev === 'dragover') { e.preventDefault(); if (drop) drop.classList.add('over'); return; }
+    e.preventDefault();
+    document.getElementById('drop')?.classList.remove('over');
+    if (drop && e.dataTransfer.files[0]) subir(e.dataTransfer.files[0]);
+  });
+}
+
+document.addEventListener('dragleave', e => {
+  if (e.target.closest?.('#drop')) e.target.closest('#drop').classList.remove('over');
+});
+
+// --- Progreso en vivo -----------------------------------------------------
+
+/**
+ * Se escucha el canal de eventos siempre, no solo en la vista de proceso: un
+ * trabajo dura minutos y quien lo lanza se va a revisar clips mientras tanto.
+ * Al terminar hay que refrescar para que aparezcan los clips nuevos.
+ */
+function escuchar() {
+  const es = new EventSource('/api/events');
+
+  es.addEventListener('job', ev => {
+    const job = JSON.parse(ev.data);
+    const i = state.jobs.findIndex(j => j.id === job.id);
+    if (i === -1) state.jobs.unshift(job);
+    else state.jobs[i] = { ...state.jobs[i], ...job };
+
+    // Un trabajo que acaba cambia lo que hay en disco, asi que toca releer.
+    if (!vivo(job)) { refrescar(); return; }
+
+    if (state.view === 'proceso') render();
+    if (state.openLog === job.id) pintarLog(job.id);
+  });
+
+  /*
+   * Aviso de que los datos cambiaron en el servidor.
+   *
+   * Sin esto los numeros solo se releian al cambiar de seccion: aprobar videos
+   * desde el movil dejaba el contador del portatil congelado, y parecia que la
+   * aprobacion no habia funcionado.
+   */
+  es.addEventListener('datos', () => { refrescar(); });
+
+  // EventSource reconecta solo, pero si el servidor se cayo del todo conviene
+  // no dejar la pagina enseñando datos viejos en silencio.
+  es.addEventListener('error', () => {
+    document.getElementById('hint').textContent = 'Sin conexion con el servidor. Reintentando...';
+  });
+  es.addEventListener('open', () => {
+    if (state.view !== 'clips') document.getElementById('hint').textContent = '';
+  });
+}
+
+/*
+ * Red de seguridad: releer al volver a la pestaña.
+ *
+ * El aviso por SSE cubre el caso normal, pero un movil que estuvo con la
+ * pantalla apagada puede haber perdido la conexion sin enterarse. Al volver a
+ * mirar, lo primero que ve el usuario tiene que ser el dato de verdad.
+ */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refrescar();
+});
+addEventListener('focus', refrescar);
+
+/*
+ * Se pinta ANTES de pedir nada.
+ *
+ * Cada vista devuelve su esqueleto cuando no tiene datos, pero nadie los
+ * llamaba hasta que la respuesta llegaba: la primera pintada ocurria DESPUES
+ * del primer fetch. Con la base recien despierta -- Supabase tarda en abrir la
+ * primera conexion, y se han medido mas de treinta segundos -- eso son treinta
+ * segundos de pantalla negra sin un solo pixel que diga que algo esta pasando.
+ *
+ * Un render seco al arrancar cuesta nada y pone los huesos en su sitio.
+ */
+render();
+
+/*
+ * La primera carga, con red de seguridad.
+ *
+ * Si esta falla -- el servidor todavia arrancando, el movil sin cobertura al
+ * abrir el enlace -- no habia nada que lo recogiera: el panel se quedaba en
+ * una pantalla negra vacia, sin mensaje ni forma de reintentar, y la unica
+ * salida era recargar a mano sin saber por que.
+ *
+ * Los refrescos POSTERIORES no llevan esto a proposito: ahi ya hay contenido
+ * en pantalla y tapar lo que se esta leyendo con un error seria peor. Un
+ * fallo pasajero se resuelve solo en el siguiente aviso del servidor.
+ */
+refrescar().catch((error) => {
+  document.getElementById('view').innerHTML =
+    '<div class="empty ancho"><b>No se pudo cargar el panel</b>' +
+    esc(error.message || 'No hubo respuesta del servidor.') +
+    '<div class="actions" style="justify-content:center;margin-top:var(--s4)">' +
+      '<button class="act go" id="reintentar">Reintentar</button>' +
+    '</div></div>';
+});
+
+document.addEventListener('click', e => {
+  if (e.target.id !== 'reintentar') return;
+  e.target.disabled = true;
+  e.target.textContent = 'Cargando...';
+  location.reload();
+});
+
+escuchar();
+// --- Buscador -------------------------------------------------------------
+
+/*
+ * Un sitio al que ir cuando ya no cabe bajar scrolleando.
+ *
+ * Con catorce videos y cuarenta y cinco clips pendientes, llegar a UNO concreto
+ * son dos minutos de rueda. Esto lo deja en tres teclas.
+ *
+ * Busca sobre lo que el panel YA tiene cargado, no contra el servidor. Es
+ * deliberado: la respuesta es instantanea mientras se teclea y no hay que
+ * inventar un endpoint ni debounces. Lo que no este cargado todavia no sale, y
+ * eso se dice en el estado vacio en vez de fingir que no existe.
+ */
+const buscador = {
+  abierto: false,
+  items: [],
+  indice: 0,
+  /** Donde estaba el foco antes de abrir, para devolverlo al cerrar. */
+  antes: null,
+};
+
+/** Normaliza para comparar: sin acentos, sin mayusculas. */
+function plano(t) {
+  return String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Todo lo que se puede encontrar, en una lista plana.
+ *
+ * El orden importa y no es alfabetico: primero las pantallas, que es lo que se
+ * busca la mayor parte de las veces y lo que siempre esta disponible. Despues
+ * las cosas concretas.
+ */
+function buscables() {
+  const out = [];
+
+  for (const [id, sec] of Object.entries(SECCIONES)) {
+    for (const [vista, etiqueta] of sec.vistas) {
+      out.push({
+        que: 'Pantalla',
+        cual: sec.vistas.length > 1 ? sec.titulo + ' / ' + etiqueta : sec.titulo,
+        // Las palabras de la explicacion tambien cuentan: quien busca
+        // "hashtags" tiene que llegar a Marca y textos sin saber como se llama.
+        texto: sec.titulo + ' ' + etiqueta + ' ' + (INTROS[vista] ?? ''),
+        ir: vista,
+      });
+    }
+  }
+
+  for (const s of state.overview?.sources ?? []) {
+    out.push({
+      que: 'Video',
+      cual: s.title,
+      texto: s.title,
+      // Al detalle del VOD, que es donde se ve entero.
+      vod: s.id,
+    });
+  }
+
+  for (const c of state.clips ?? []) {
+    out.push({
+      que: 'Clip',
+      cual: c.caption || c.hook || c.id,
+      texto: (c.caption ?? '') + ' ' + (c.hook ?? '') + ' ' + c.id,
+      ir: 'clips',
+    });
+  }
+
+  /*
+   * Cada perilla de Ajustes, por su nombre.
+   *
+   * Son veintisiete repartidas en ocho tarjetas, y hasta ahora encontrar "el
+   * color del borde" era bajar leyendo titulos. Al elegirla, el buscador
+   * lleva a Ajustes y la resalta.
+   *
+   * CORTES y FLUJO son las mismas listas con las que se pinta la pantalla,
+   * asi que no puede haber un ajuste buscable que no exista ni al reves.
+   */
+  for (const [lista, vista] of [[CORTES, 'ajustes'], [BLOQUES, 'flujo']]) {
+    for (const b of lista ?? []) {
+      for (const c of b.campos ?? []) {
+        out.push({
+          que: 'Ajuste',
+          // Con el bloque delante: hay dos "Color del borde", el del
+          // subtitulo y el del rotulo, y sin el no hay forma de elegir.
+          cual: b.titulo + '  ·  ' + c.texto,
+          // Tambien el titulo del bloque: quien busca "subtitulos" tiene que
+          // encontrar el color y el tamaño, que no llevan esa palabra.
+          texto: c.texto + ' ' + b.titulo + ' ' + (b.pie ?? ''),
+          ir: vista,
+          ajuste: c.key,
+        });
+      }
+    }
+  }
+
+  /*
+   * Las cuentas vienen de /api/proyectos, que es quien las trae con su
+   * identificador y su arroba de TikTok. Solo estan cargadas si has pasado por
+   * Clientes o Cuentas; mientras no, no salen, que es mejor que una lista a
+   * medias.
+   */
+  for (const a of state.proyectos?.cuentas ?? []) {
+    out.push({
+      que: 'Cuenta',
+      cual: a.tiktok ? a.id + '  @' + a.tiktok : a.id,
+      texto: a.id + ' ' + (a.tiktok ?? ''),
+      ir: 'plataformas',
+    });
+  }
+
+  return out;
+}
+
+function filtrarBuscador(q) {
+  const todo = buscables();
+  /*
+   * Todas las palabras, en cualquier orden, no la frase seguida.
+   *
+   * Con la frase entera, "rotulo borde" no encontraba "El rotulo de arriba /
+   * Grosor del borde", que es exactamente lo que se estaba buscando. Nadie
+   * teclea en el orden en que esta escrito: se teclean las dos palabras que
+   * uno recuerda.
+   */
+  const partes = plano(q).split(' ').filter(Boolean);
+  // Sin texto se enseñan las pantallas: abrir el buscador y ver una lista
+  // vacia no dice que se puede hacer con el.
+  if (partes.length === 0) return todo.filter(i => i.que === 'Pantalla');
+  return todo
+    .filter(i => { const t = plano(i.texto); return partes.every(p => t.includes(p)); })
+    .slice(0, 20);
+}
+
+function pintarBuscador() {
+  const ul = document.getElementById('resultados');
+  if (buscador.items.length === 0) {
+    ul.innerHTML = '<li class="nada">Nada con ese nombre entre lo que hay cargado.</li>';
+    return;
+  }
+  ul.innerHTML = buscador.items.map((i, n) =>
+    '<li role="option" data-n="' + n + '" aria-selected="' + (n === buscador.indice) + '">' +
+    '<span class="que">' + i.que + '</span>' +
+    '<span class="cual">' + esc(i.cual) + '</span></li>').join('');
+  const activo = ul.querySelector('[aria-selected="true"]');
+  if (activo) activo.scrollIntoView({ block: 'nearest' });
+}
+
+function abrirBuscador(abrir) {
+  const caja = document.getElementById('buscador');
+  const input = document.getElementById('buscar');
+  buscador.abierto = abrir;
+  caja.hidden = !abrir;
+  if (abrir) {
+    buscador.antes = document.activeElement;
+    input.value = '';
+    buscador.indice = 0;
+    buscador.items = filtrarBuscador('');
+    pintarBuscador();
+    input.focus();
+  } else if (buscador.antes) {
+    // Devolver el foco donde estaba. Sin esto, cerrar con Escape manda el
+    // tabulador al principio de la pagina y hay que recorrerla otra vez.
+    buscador.antes.focus();
+    buscador.antes = null;
+  }
+}
+
+function elegirBuscador(i) {
+  const item = buscador.items[i];
+  if (!item) return;
+  abrirBuscador(false);
+  if (item.vod) { abrirVod(item.vod); return; }
+  state.view = item.ir;
+  state.ultimaVista[SECCION_DE[state.view]] = state.view;
+  state.openLog = null;
+  // La perilla concreta, para resaltarla cuando la pantalla este pintada.
+  state.resaltar = item.ajuste ?? null;
+  refrescar();
+}
+
+document.addEventListener('keydown', e => {
+  // Ctrl+K en todas partes, Cmd+K en Mac. Es el atajo que ya espera cualquiera.
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    abrirBuscador(!buscador.abierto);
+    return;
+  }
+  if (!buscador.abierto) return;
+  if (e.key === 'Escape') { e.preventDefault(); abrirBuscador(false); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = buscador.items.length;
+    if (n === 0) return;
+    // Da la vuelta por los dos lados: desde el primero, Arriba lleva al ultimo.
+    buscador.indice = (buscador.indice + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    pintarBuscador();
+    return;
+  }
+  if (e.key === 'Enter') { e.preventDefault(); elegirBuscador(buscador.indice); }
+});
+
+document.addEventListener('input', e => {
+  if (e.target.id !== 'buscar') return;
+  buscador.items = filtrarBuscador(e.target.value);
+  buscador.indice = 0;
+  pintarBuscador();
+});
+
+document.addEventListener('click', e => {
+  if (e.target.closest('#abrir-buscar')) { abrirBuscador(true); return; }
+  if (!buscador.abierto) return;
+  const fila = e.target.closest('.resultados li[data-n]');
+  if (fila) { elegirBuscador(Number(fila.dataset.n)); return; }
+  // Pinchar fuera de la caja cierra. Dentro, no.
+  if (!e.target.closest('.buscador-caja')) abrirBuscador(false);
+});
+
+// Con el raton encima manda el raton: si no, las flechas marcarian un resultado
+// y el puntero estaria sobre otro, y al pulsar se abriria el que no era.
+document.addEventListener('mousemove', e => {
+  if (!buscador.abierto) return;
+  const fila = e.target.closest('.resultados li[data-n]');
+  if (!fila) return;
+  const n = Number(fila.dataset.n);
+  if (n === buscador.indice) return;
+  buscador.indice = n;
+  pintarBuscador();
+});
+
+// --- La linea de tiempo ---------------------------------------------------
+
+/*
+ * El unico elemento que hace que esto parezca una herramienta de video.
+ *
+ * Todo lo demas de este panel son tarjetas, listas y cifras, que es lo que
+ * tiene cualquier panel de administracion. Esto no: es el directo entero
+ * dibujado a escala, con cada momento encontrado en el sitio donde ocurre.
+ *
+ * Y no es decorativa. Responde de un vistazo a la pregunta que nadie podia
+ * contestar antes: por que un VOD de dos horas solo dio tres clips. Si los
+ * marcadores se apelotonan en los primeros veinte minutos, el resto del
+ * directo no tenia nada, y eso es informacion sobre el material, no sobre el
+ * programa.
+ *
+ * Aparece en dos sitios y en ninguno mas: compacta en la ficha de cada video
+ * de Inicio, completa en el detalle. En cualquier otro sitio seria adorno.
+ */
+
+/** mm:ss, o h:mm:ss cuando pasa de la hora. */
+function reloj(sec) {
+  const t = Math.max(0, Math.round(sec));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), g = t % 60;
+  const mm = String(m).padStart(2, '0'), gg = String(g).padStart(2, '0');
+  return h > 0 ? h + ':' + mm + ':' + gg : m + ':' + gg;
+}
+
+/**
+ * Cada cuanto poner una marca para que salgan entre cuatro y ocho.
+ *
+ * Un paso fijo no sirve: diez minutos en un VOD de tres minutos no pinta
+ * ninguna marca, y en uno de tres horas pinta dieciocho encimadas. Se elige
+ * del juego de pasos redondos el primero que deja pocas marcas, porque una
+ * marca en 7:30 no ayuda a nadie a situarse.
+ */
+function pasoEje(durSec) {
+  for (const p of [15, 30, 60, 120, 300, 600, 900, 1800, 3600]) {
+    if (durSec / p <= 8) return p;
+  }
+  return 7200;
+}
+
+/**
+ * La linea de tiempo.
+ *
+ * compacta = la de la ficha de Inicio: sin eje ni etiquetas, solo la barra con
+ * los momentos. Es un resumen que se lee de reojo mientras se baja la lista.
+ */
+function lineaTiempo(dur, clips, compacta) {
+  if (!(dur > 0)) return '';
+
+  const pct = t => Math.min(100, Math.max(0, (t / dur) * 100));
+
+  const marcas = clips.map(c => {
+    /*
+     * Ancho minimo del 0,8%: un clip de 30 segundos dentro de un VOD de dos
+     * horas mide un 0,4% y en una barra de 600 px eso son dos pixeles, que no
+     * se ven y menos se pulsan. Se ensancha para poder tocarlo; la POSICION,
+     * que es lo que informa, no se toca.
+     */
+    const izq = pct(c.start);
+    const ancho = Math.max(0.8, pct(c.end) - izq);
+    const estado = c.status === 'approved' ? 'si' : (c.status === 'rejected' ? 'no' : 'pend');
+    const titulo = reloj(c.start) + '  ' + (c.hook || c.caption || c.id);
+    return '<button class="marca ' + estado + '" style="left:' + izq.toFixed(3) + '%;width:' +
+      ancho.toFixed(3) + '%" data-clip-eje="' + esc(c.id) + '"' +
+      ' title="' + esc(titulo) + '" aria-label="' + esc(titulo) + '"></button>';
+  }).join('');
+
+  if (compacta) {
+    return '<div class="eje compacto" role="img" aria-label="' +
+      plural(clips.length, 'momento') + ' repartidos a lo largo de ' + reloj(dur) + '">' +
+      '<div class="pista">' + marcas + '</div></div>';
+  }
+
+  const paso = pasoEje(dur);
+  let reglas = '';
+  for (let t = 0; t <= dur; t += paso) {
+    reglas += '<span class="tic" style="left:' + pct(t).toFixed(3) + '%">' +
+      '<i></i><b>' + reloj(t) + '</b></span>';
+  }
+
+  return '<div class="eje">' +
+    '<div class="regla">' + reglas + '</div>' +
+    '<div class="pista">' + marcas + '</div>' +
+    '<p class="leyenda">' +
+      '<span><i class="pt pend"></i>sin revisar</span>' +
+      '<span><i class="pt si"></i>aprobado</span>' +
+      '<span><i class="pt no"></i>descartado</span>' +
+    '</p>' +
+  '</div>';
+}
+
+// --- Vista: detalle de un video -------------------------------------------
+
+function abrirVod(id) {
+  state.vodId = id;
+  state.vod = null;
+  state.view = 'vod';
+  state.openLog = null;
+  refrescar();
+}
+
+function vistaVod() {
+  const d = state.vod;
+  if (!d) return esqueleto(2, false);
+
+  const pend = d.clips.filter(c => c.status === 'pending').length;
+  const ok = d.clips.filter(c => c.status === 'approved').length;
+  const no = d.clips.filter(c => c.status === 'rejected').length;
+
+  /*
+   * El rastro de migas, no un boton de atras suelto.
+   *
+   * Esta es la unica pantalla del panel que esta por debajo de otra, asi que
+   * es la unica que necesita decir de donde cuelga. Un atras a secas no dice a
+   * donde vuelves; "Inicio / este video" si.
+   */
+  const migas = '<nav class="migas ancho" aria-label="Donde estas">' +
+    '<button data-ir="proceso">Inicio</button>' +
+    '<span aria-hidden="true">/</span>' +
+    '<b>' + esc(d.title) + '</b>' +
+  '</nav>';
+
+  if (d.clips.length === 0) {
+    return migas +
+      '<div class="empty ancho"><b>Todavia no hay momentos</b>' +
+      (d.hasTranscript
+        ? 'El texto ya esta. Falta buscar los momentos, y eso se lanza desde Inicio.'
+        : 'Este video aun se esta descargando o transcribiendo. Cuando acabe apareceran aqui.') +
+      '</div>';
+  }
+
+  const cuerpo =
+    '<article class="card ancho vodcab"><div class="body">' +
+      '<div class="vodtit">' +
+        '<h2>' + esc(d.title) + '</h2>' +
+        '<span class="cifra">' + reloj(d.durationSec) + '</span>' +
+      '</div>' +
+      (d.duracionCierta
+        ? ''
+        : '<p class="reason">La duracion real de este video no se guardo, asi que el eje ' +
+          'llega hasta el final del ultimo momento y no hasta el final del directo.</p>') +
+      lineaTiempo(d.durationSec, d.clips, false) +
+      '<div class="stats">' +
+        '<div><b>' + d.clips.length + '</b><span>Momentos</span></div>' +
+        '<div><b>' + pend + '</b><span>Sin revisar</span></div>' +
+        '<div><b>' + ok + '</b><span>Aprobados</span></div>' +
+        '<div><b>' + no + '</b><span>Descartados</span></div>' +
+      '</div>' +
+      (pend > 0
+        ? '<div class="actions"><button class="act go" data-ir="clips">' +
+          'Revisar los ' + pend + '</button></div>'
+        : '<p class="reason">Ya los has revisado todos.</p>') +
+    '</div></article>';
+
+  /*
+   * Debajo del eje, los mismos momentos como lista en orden de aparicion.
+   *
+   * El eje dice DONDE estan; la lista dice QUE son. Sin ella, para saber de
+   * que va el momento de 12:40 hay que acertar con el puntero encima de un
+   * marcador de tres pixeles, y desde el movil eso no se puede hacer.
+   */
+  const lista = '<article class="card ancho"><div class="body">' +
+    '<h3 class="t">En orden de aparicion</h3>' +
+    '<ul class="momentos">' + d.clips.map(c =>
+      '<li data-clip-eje="' + esc(c.id) + '" tabindex="0">' +
+        '<span class="cuando">' + reloj(c.start) + '</span>' +
+        '<span class="que">' + esc(c.hook || c.caption || c.id) + '</span>' +
+        '<span class="dura">' + Math.round(c.end - c.start) + 's</span>' +
+        '<span class="punto-estado ' +
+          (c.status === 'approved' ? 'si' : (c.status === 'rejected' ? 'no' : 'nada')) +
+        '"></span>' +
+      '</li>').join('') + '</ul>' +
+  '</div></article>';
+
+  return migas + cuerpo + lista;
+}
+
+/*
+ * Pulsar un momento, en el eje o en la lista, resalta el otro.
+ *
+ * No navega a ningun sitio: en esta pantalla el eje y la lista son dos vistas
+ * de lo mismo, y saltar a Revisar por tocar un marcador seria perder el sitio.
+ * Para revisar esta el boton de arriba, que dice cuantos quedan.
+ */
+document.addEventListener('click', e => {
+  const m = e.target.closest('[data-clip-eje]');
+  if (!m || state.view !== 'vod') return;
+  const id = m.dataset.clipEje;
+  for (const el of document.querySelectorAll('[data-clip-eje]')) {
+    el.classList.toggle('senalado', el.dataset.clipEje === id);
+  }
+  const fila = document.querySelector('.momentos [data-clip-eje="' + CSS.escape(id) + '"]');
+  if (fila && !fila.contains(m)) fila.scrollIntoView({ block: 'nearest' });
+});
+
+// --- Revisar en lote ------------------------------------------------------
+
+/*
+ * Decidir varios de golpe, y moverse con el teclado.
+ *
+ * Revisar cuarenta y cinco clips de uno en uno es el cuello de botella real
+ * del programa: todo lo demas va solo. Dos cosas lo acortan sin quitarle a
+ * nadie el control:
+ *
+ *   1. Seleccionar varios y resolverlos juntos. Cuando ya has visto el VOD
+ *      entero sabes que el tramo de la mitad no vale, y marcarlos es un gesto.
+ *   2. Las manos en el teclado. Antes habia una A y una R que SIEMPRE actuaban
+ *      sobre la primera tarjeta de la rejilla, asi que revisar era: mirar la
+ *      primera, decidir, esperar a que se recoloque la rejilla, mirar la
+ *      primera otra vez. Ahora hay una tarjeta en foco y se mueve.
+ *
+ * Nada de esto decide por ti: el lote hace exactamente lo que harian N clics.
+ */
+
+/** La llave de un clip. El cero no aparece en ningun identificador. */
+function llaveClip(sourceId, clipId) {
+  return sourceId + '\u0000' + clipId;
+}
+
+/** Las tarjetas de la rejilla, en el orden en que se ven. */
+function tarjetas() {
+  return [...document.querySelectorAll('.lista-clips .card[data-clip]')];
+}
+
+function tarjetaEnFoco() {
+  const t = tarjetas();
+  if (t.length === 0) return null;
+  return t[Math.min(state.foco, t.length - 1)] ?? null;
+}
+
+/**
+ * Repinta seleccion y foco SIN volver a construir la rejilla.
+ *
+ * Es la diferencia entre que moverse con las flechas sea instantaneo o que
+ * cada pulsacion vuelva a crear treinta reproductores de video y pierda la
+ * posicion de reproduccion del que estabas viendo.
+ */
+function pintarSeleccion() {
+  const t = tarjetas();
+  if (state.foco >= t.length) state.foco = Math.max(0, t.length - 1);
+
+  /*
+   * Primero se tira lo marcado que ya no esta en la rejilla.
+   *
+   * Despues de decidir un lote la lista se repinta sin esos clips, pero sus
+   * llaves seguirian en el conjunto y la barra diria "8 videos" con cero
+   * tarjetas marcadas a la vista. Lo que manda es lo que se ve.
+   */
+  const presentes = new Set(t.map(c => llaveClip(c.dataset.source, c.dataset.clip)));
+  for (const k of state.sel) if (!presentes.has(k)) state.sel.delete(k);
+
+  t.forEach((card, i) => {
+    const k = llaveClip(card.dataset.source, card.dataset.clip);
+    const marcada = state.sel.has(k);
+    card.classList.toggle('elegida', marcada);
+    card.classList.toggle('enfoco', i === state.foco && state.conTeclado);
+    const casilla = card.querySelector('.elegir input');
+    if (casilla) casilla.checked = marcada;
+  });
+
+  const barra = document.getElementById('lote');
+  if (!barra) return;
+  const n = state.sel.size;
+  barra.hidden = n === 0;
+  if (n > 0) {
+    barra.querySelector('.cuantos').textContent = plural(n, 'video') + ' sin decidir';
+    const marca = barra.querySelector('[data-marca]');
+    if (marca) marca.textContent = n >= t.length ? 'Quitar la marca' : 'Marcar todos';
+  }
+}
+
+function elegir(card, marcar) {
+  const k = llaveClip(card.dataset.source, card.dataset.clip);
+  if (marcar === undefined) marcar = !state.sel.has(k);
+  if (marcar) state.sel.add(k); else state.sel.delete(k);
+  pintarSeleccion();
+}
+
+function moverFoco(paso) {
+  const t = tarjetas();
+  if (t.length === 0) return;
+  state.conTeclado = true;
+  state.foco = Math.min(t.length - 1, Math.max(0, state.foco + paso));
+  pintarSeleccion();
+  const card = t[state.foco];
+  /*
+   * Centrado, no "lo justo para que se vea".
+   *
+   * Una tarjeta de clip mide dos tercios de la pantalla. Con block:nearest la
+   * siguiente queda pegada al borde de abajo y hay que bajar a mano para ver
+   * el video, que es lo unico que hay que mirar para decidir.
+   */
+  card.scrollIntoView({ block: 'center', behavior: comoDesplazar() });
+}
+
+/** Cuantas tarjetas por fila hay ahora mismo, para que arriba y abajo vayan bien. */
+function porFila() {
+  const t = tarjetas();
+  if (t.length < 2) return 1;
+  const y = t[0].getBoundingClientRect().top;
+  let n = 1;
+  while (n < t.length && Math.abs(t[n].getBoundingClientRect().top - y) < 4) n += 1;
+  return n;
+}
+
+async function decidirLote(status) {
+  const items = [...state.sel].map(k => {
+    const [sourceId, clipId] = k.split('\u0000');
+    return { sourceId, clipId };
+  });
+  if (items.length === 0) return;
+
+  const barra = document.getElementById('lote');
+  if (barra) for (const b of barra.querySelectorAll('button')) b.disabled = true;
+
+  try {
+    const r = await api('/api/clips/lote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status, items }),
+    });
+    state.sel.clear();
+    /*
+     * Se dice cuantos, y tambien cuantos no.
+     *
+     * Un "listo" a secas despues de mandar quince cuando solo entraron trece
+     * es exactamente la clase de silencio que hace que luego nadie entienda
+     * por que faltan dos.
+     */
+    avisar(plural(r.hechos, 'video') + ' ' +
+      (status === 'approved' ? 'aprobado' : status === 'rejected' ? 'descartado' : 'devuelto') +
+      (r.hechos === 1 ? '' : 's') +
+      (r.fallidos.length > 0 ? '. ' + plural(r.fallidos.length, 'no se encontro', 'no se encontraron') : '.'));
+  } catch (error) {
+    avisar(error.message);
+  }
+  await refrescar();
+}
+
+document.addEventListener('click', e => {
+  if (state.view !== 'clips') return;
+
+  const casilla = e.target.closest('.elegir input');
+  if (casilla) {
+    // El clic en la casilla no debe llegar al <article>, que abriria el video.
+    e.stopPropagation();
+    elegir(casilla.closest('.card'), casilla.checked);
+    return;
+  }
+
+  const bot = e.target.closest('#lote [data-lote]');
+  if (bot) { decidirLote(bot.dataset.lote); return; }
+
+  if (e.target.closest('#lote [data-marca]')) {
+    const todas = tarjetas();
+    // Con todas marcadas, el boton desmarca. Es lo que dice su texto, que
+    // tambien cambia.
+    if (state.sel.size >= todas.length) state.sel.clear();
+    else for (const c of todas) state.sel.add(llaveClip(c.dataset.source, c.dataset.clip));
+    pintarSeleccion();
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (state.view !== 'clips') return;
+  /*
+   * Dentro de un campo de texto las letras son letras.
+   *
+   * El interrogante no sobra: el objetivo de un keydown puede ser el propio
+   * documento cuando no hay nada enfocado, y document no tiene matches(). Sin
+   * el, ese caso lanza y se come el resto del manejador.
+   */
+  if (e.target.matches?.('textarea, input')) return;
+  if (buscador.abierto) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); moverFoco(porFila()); return; }
+  if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); moverFoco(-porFila()); return; }
+  if (e.key === 'ArrowRight') { e.preventDefault(); moverFoco(1); return; }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); moverFoco(-1); return; }
+
+  if (e.key === 'Escape' && state.sel.size > 0) {
+    e.preventDefault();
+    state.sel.clear();
+    pintarSeleccion();
+    return;
+  }
+
+  const card = tarjetaEnFoco();
+  if (!card) return;
+
+  if (e.key === ' ' || e.key === 'x' || e.key === 'X') {
+    e.preventDefault();
+    state.conTeclado = true;
+    elegir(card);
+    return;
+  }
+
+  if (e.key !== 'a' && e.key !== 'A' && e.key !== 'r' && e.key !== 'R') return;
+  if (state.filter !== 'pending') return;
+  e.preventDefault();
+  const status = (e.key === 'a' || e.key === 'A') ? 'approved' : 'rejected';
+  /*
+   * Con algo marcado, A y R resuelven LA SELECCION.
+   *
+   * Es lo que espera cualquiera que acaba de marcar ocho: si la A resolviera
+   * solo la tarjeta en foco, el trabajo de marcarlas no habria servido de
+   * nada y encima habria decidido una sin querer.
+   */
+  if (state.sel.size > 0) { decidirLote(status); return; }
+  decide(card, status);
+});
+
+// Tocar con el raton apaga el resaltado del teclado: tener dos cosas marcadas
+// a la vez -- una por el puntero y otra por las flechas -- no dice cual manda.
+document.addEventListener('pointerdown', () => {
+  if (!state.conTeclado) return;
+  state.conTeclado = false;
+  pintarSeleccion();
+});
+
+// --- Las dos capas de texto de la vista previa ----------------------------
+
+/*
+ * El subtitulo y el rotulo se dibujan con el mismo codigo.
+ *
+ * Son dos capas del mismo lienzo de 1080x1920 y se diferencian en tres cosas:
+ * de que borde cuelgan, que ajustes las gobiernan y que texto llevan. Todo lo
+ * demas -- la escala, el borde de cada letra, el orden de pintado -- es
+ * identico, y tenerlo dos veces garantizaba que un dia se separaran.
+ *
+ * El lienzo se pinta a 270 px de ancho, asi que lo que viene en pixeles del
+ * lienzo se multiplica por esta escala.
+ */
+const ESCALA_PV = 270 / 1080;
+
+const CAPAS = {
+  sub: {
+    clase: 'pv-sub',
+    // De abajo: es donde viven los subtitulos y donde TikTok pone su interfaz.
+    lado: 'bottom',
+    activa: 'subtitles',
+    pos: 'subMargin',
+    tam: 'subSize',
+    color: 'subColor',
+    borde: 'subColorBorde',
+    grosor: 'subBorde',
+    // Los limites son los mismos que valida el servidor. Arrastrar fuera de
+    // rango produciria un ajuste que al guardar se rechaza, y el usuario veria
+    // un error por haber movido el raton.
+    min: 120,
+    max: 900,
+  },
+  titulo: {
+    clase: 'pv-titulo',
+    lado: 'top',
+    activa: 'tituloActivo',
+    pos: 'tituloArriba',
+    tam: 'tituloTam',
+    color: 'tituloColor',
+    borde: 'tituloColorBorde',
+    grosor: 'tituloBorde',
+    min: 80,
+    max: 700,
+  },
+};
+
+/** El texto que lleva cada capa, con los ajustes y el clip de muestra. */
+function textoCapa(cual, a, m) {
+  const pie = String(m.hook || m.caption || '');
+  if (cual === 'titulo') {
+    // Lo mismo que hace renderClip: la plantilla con el pie dentro.
+    const t = String(a.tituloTexto || '{titulo}').replaceAll('{titulo}', pie).trim();
+    return t || 'el titulo del clip';
+  }
+  // Doble barra: este guion vive dentro de un template literal y un \\s suelto
+  // llegaria al navegador como una s.
+  const palabras = pie.split(/\\s+/).filter(Boolean);
+  return palabras.slice(0, Math.max(1, a.subPalabras)).join(' ') || 'asi se veran';
+}
+
+/** El estilo en linea de una capa, en pixeles ya escalados. */
+function estiloCapa(cual, a) {
+  const c = CAPAS[cual];
+  return [
+    // La fuente es la misma para las dos: el .ass declara los dos estilos con
+    // el mismo Fontname, porque libass resuelve por nombre contra las
+    // instaladas y mezclar dos familias pediria instalar otra.
+    'font-family:' + JSON.stringify(a.subFont).slice(1, -1) + ',Impact,sans-serif',
+    'font-size:' + (a[c.tam] * ESCALA_PV).toFixed(1) + 'px',
+    'color:' + a[c.color],
+    // El borde del .ass rodea cada letra por los cuatro lados. En el navegador
+    // eso es -webkit-text-stroke, que se mide por el centro del trazo: la
+    // mitad, para que el grosor aparente coincida.
+    '-webkit-text-stroke:' + Math.max(0, a[c.grosor] * ESCALA_PV / 2).toFixed(2) + 'px ' + a[c.borde],
+    'paint-order:stroke fill',
+    c.lado + ':' + (a[c.pos] * ESCALA_PV).toFixed(1) + 'px',
+  ].join(';');
+}
+
+/**
+ * Crea, actualiza o quita una capa sin repintar la vista entera.
+ *
+ * Un render completo recrearia la etiqueta video y cortaria la reproduccion
+ * en cada tecla, que es justo lo que no se quiere mientras se afina un color.
+ */
+function pintarCapa(marco, cual, a, m) {
+  const c = CAPAS[cual];
+  const existente = marco.querySelector('.' + c.clase);
+  if (!a[c.activa]) { if (existente) existente.remove(); return; }
+
+  const nodo = existente ?? marco.appendChild(Object.assign(
+    document.createElement('div'),
+    {
+      className: c.clase + ' pv-capa',
+      title: 'Arrastra para moverlo, o pulsa y usa las flechas',
+      // tabindex aqui tambien: una capa creada al encenderla en vivo tiene
+      // que poder colocarse con el teclado igual que una pintada de entrada.
+      tabIndex: 0,
+    },
+  ));
+  nodo.dataset.capa = cual;
+  nodo.textContent = textoCapa(cual, a, m);
+  nodo.setAttribute('style', estiloCapa(cual, a));
+}
+
+/*
+ * ARRASTRAR PARA COLOCAR.
+ *
+ * Elegir la altura en un desplegable de cinco opciones es elegir a ciegas:
+ * "alto" y "casi en el centro" no dicen si tapa la cara de quien habla. Aqui
+ * se ve el video detras, se agarra el texto y se suelta donde va.
+ *
+ * El valor que sale del arrastre casi nunca coincide con una de las opciones
+ * del desplegable, asi que se le AÑADE una opcion con ese numero y se
+ * selecciona. De ese modo el desplegable sigue siendo la unica fuente de
+ * verdad: guardar manda lo que ponga ahi, igual que antes, y no hay un estado
+ * paralelo que pueda discrepar de lo que se ve.
+ */
+function fijarAjuste(key, valor) {
+  const sel = document.querySelector('[data-ajuste="' + key + '"]');
+  if (!sel) return;
+  const v = String(valor);
+  if (![...sel.options].some(o => o.value === v)) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = 'a mano (' + v + ')';
+    sel.append(o);
+  }
+  sel.value = v;
+}
+
+let arrastre = null;
+
+document.addEventListener('pointerdown', e => {
+  const capa = e.target.closest('.pv-capa');
+  if (!capa) return;
+  const marco = capa.closest('.pv-marco');
+  if (!marco) return;
+  e.preventDefault();
+  const c = CAPAS[capa.dataset.capa];
+  const a = ajustesDelFormulario();
+  arrastre = {
+    capa,
+    c,
+    // Se guarda el punto de partida y se suma el desplazamiento, en vez de
+    // colocar el texto donde esta el puntero: agarrar por el borde no debe
+    // hacer que el texto salte para centrarse en el dedo.
+    y0: e.clientY,
+    desde: a[c.pos],
+    alto: marco.getBoundingClientRect().height,
+  };
+  // Captura: el puntero puede salirse del texto -- que es pequeño -- sin que
+  // el arrastre se corte a mitad.
+  capa.setPointerCapture(e.pointerId);
+  capa.classList.add('moviendo');
+});
+
+document.addEventListener('pointermove', e => {
+  if (!arrastre) return;
+  const { c, y0, desde, alto } = arrastre;
+  // De pixeles de pantalla a pixeles del lienzo de 1920.
+  const delta = ((e.clientY - y0) / alto) * 1920;
+  // Arriba se mide desde el techo y abajo desde el suelo, asi que el mismo
+  // gesto hacia abajo suma en una capa y resta en la otra.
+  const crudo = c.lado === 'top' ? desde + delta : desde - delta;
+  const valor = Math.round(Math.min(c.max, Math.max(c.min, crudo)));
+  fijarAjuste(c.pos, valor);
+  refrescarVistaPrevia();
+});
+
+for (const fin of ['pointerup', 'pointercancel']) {
+  document.addEventListener(fin, () => {
+    if (!arrastre) return;
+    arrastre.capa.classList.remove('moviendo');
+    arrastre = null;
+    // No se guarda solo: el arrastre es tanteo, igual que mover un
+    // desplegable. Lo guarda el boton de abajo, como todo lo demas.
+  });
+}
+
+/*
+ * Mover con el teclado lo mismo que con el raton.
+ *
+ * Sin esto, la altura del rotulo seria el unico ajuste del panel que no se
+ * puede tocar sin raton. Las flechas mueven de 10 en 10 pixeles del lienzo, y
+ * con Mayus de 50: a 10 px por pulsacion, recorrer los 620 px de rango serian
+ * sesenta y dos pulsaciones.
+ */
+document.addEventListener('keydown', e => {
+  const capa = e.target.closest?.('.pv-capa');
+  if (!capa) return;
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  const c = CAPAS[capa.dataset.capa];
+  const a = ajustesDelFormulario();
+  const paso = (e.shiftKey ? 50 : 10) * (e.key === 'ArrowDown' ? 1 : -1);
+  const crudo = c.lado === 'top' ? a[c.pos] + paso : a[c.pos] - paso;
+  fijarAjuste(c.pos, Math.round(Math.min(c.max, Math.max(c.min, crudo))));
+  refrescarVistaPrevia();
+  // El repintado reemplaza el contenido pero NO el nodo, asi que el foco se
+  // queda donde estaba y se puede seguir pulsando la flecha.
+  capa.focus();
+});
+
+/** La capa, en HTML, para la primera pintada de la vista previa. */
+function capaHtml(cual, a, m) {
+  const c = CAPAS[cual];
+  if (!a[c.activa]) return '';
+  return '<div class="' + c.clase + ' pv-capa" data-capa="' + cual + '" tabindex="0"' +
+    ' title="Arrastra para moverlo, o pulsa y usa las flechas"' +
+    ' style="' + estiloCapa(cual, a) + '">' + esc(textoCapa(cual, a, m)) + '</div>';
+}
+
+// --- Ajustar el corte de un momento ---------------------------------------
+
+/*
+ * Mover el principio y el final de un clip sin salir de Revisar.
+ *
+ * Hasta ahora un momento cortado dos segundos tarde no tenia arreglo desde el
+ * panel: o se descartaba o se publicaba con el arranque flojo. La unica
+ * alternativa era rehacer el VOD entero, que son veinte minutos de GPU para
+ * corregir uno.
+ *
+ * El gesto NO es una forma de onda. Aqui no hace falta: el video ya esta
+ * delante y reproduciendose, asi que lo natural es pararlo donde debe empezar
+ * y decir "empieza aqui". Una onda obligaria a descargar y decodificar el
+ * audio de cada clip para enseñar un dibujo del que, al final, se deduce lo
+ * mismo que ya se ve y se oye.
+ *
+ * Los numeros son del VOD, no del clip: son los que entiende el render y los
+ * que se ven en la cabecera de la tarjeta.
+ */
+
+/** Los dos campos de un recorte, leidos de la tarjeta. */
+function corteDe(card) {
+  const ini = card.querySelector('.corte-ini');
+  const fin = card.querySelector('.corte-fin');
+  if (!ini || !fin) return null;
+  return { start: Number(ini.value), end: Number(fin.value) };
+}
+
+/** Pone al dia la duracion y si el boton se puede pulsar. */
+function pintarCorte(card) {
+  const c = corteDe(card);
+  if (!c) return;
+  const aviso = card.querySelector('.corte-aviso');
+  const boton = card.querySelector('[data-rehacer]');
+  const dur = c.end - c.start;
+
+  let problema = '';
+  if (!Number.isFinite(c.start) || !Number.isFinite(c.end)) problema = 'Faltan los segundos.';
+  else if (dur <= 0) problema = 'El final tiene que ir despues del principio.';
+  else if (dur < 5) problema = 'Menos de 5 segundos no da para un clip.';
+  else if (dur > 180) problema = 'Mas de 3 minutos no cabe en un corte.';
+
+  // Sin cambios no hay nada que rehacer: el boton apagado dice eso mejor que
+  // dejar lanzar un render que produce el mismo fichero.
+  const igual = String(c.start) === card.dataset.start && String(c.end) === card.dataset.end;
+
+  aviso.textContent = problema !== '' ? problema
+    : igual ? 'Sin cambios.'
+    : 'Quedaria en ' + dur.toFixed(1) + ' s.';
+  aviso.classList.toggle('mal', problema !== '');
+  boton.disabled = problema !== '' || igual;
+}
+
+/**
+ * Lanza el rehacer de un solo clip.
+ *
+ * Primero lo devuelve a pendientes y solo despues encola el render. El orden
+ * importa: un clip aprobado con el corte cambiado seguiria aprobado y se
+ * publicaria un video que nadie ha visto, porque la aprobacion era del corte
+ * viejo. Si el primer paso falla, el segundo no llega a lanzarse.
+ */
+async function rehacerCorte(card) {
+  const c = corteDe(card);
+  if (!c) return;
+  const sourceId = card.dataset.source;
+  const clipId = card.dataset.clip;
+  const boton = card.querySelector('[data-rehacer]');
+  boton.disabled = true;
+
+  try {
+    await api('/api/clips/' + encodeURIComponent(sourceId) + '/' + encodeURIComponent(clipId), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'pending' }),
+    });
+    await api('/api/jobs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'render',
+        params: { sourceId, clipId, start: c.start, end: c.end },
+      }),
+    });
+    avisar('Rehaciendo ' + clipId + '. Tarda menos de un minuto; aparecera con el corte nuevo.');
+  } catch (error) {
+    avisar(error.message);
+    boton.disabled = false;
+    return;
+  }
+  await refrescar();
+}
+
+document.addEventListener('click', e => {
+  const card = e.target.closest('.card[data-clip]');
+  if (!card) return;
+
+  /*
+   * "Empieza aqui" y "Acaba aqui" toman el instante del video.
+   *
+   * El reproductor va de 0 al final del clip; el corte se mide sobre el VOD.
+   * Sumar el principio original traduce de uno a otro, y es la unica cuenta
+   * que hay en todo esto.
+   */
+  const marca = e.target.closest('[data-marcar]');
+  if (marca) {
+    const video = card.querySelector('video');
+    if (!video) return;
+    const base = Number(card.dataset.start);
+    const t = Number((base + video.currentTime).toFixed(2));
+    const campo = card.querySelector(marca.dataset.marcar === 'ini' ? '.corte-ini' : '.corte-fin');
+    campo.value = String(t);
+    pintarCorte(card);
+    return;
+  }
+
+  if (e.target.closest('[data-rehacer]')) { rehacerCorte(card); return; }
+
+  if (e.target.closest('[data-corte-reset]')) {
+    card.querySelector('.corte-ini').value = card.dataset.start;
+    card.querySelector('.corte-fin').value = card.dataset.end;
+    pintarCorte(card);
+  }
+});
+
+document.addEventListener('input', e => {
+  if (!e.target.matches?.('.corte-ini, .corte-fin')) return;
+  const card = e.target.closest('.card[data-clip]');
+  if (card) pintarCorte(card);
+});
+
+// --- La lista de cuentas, que crece con el numero de cuentas ---------------
+
+/*
+ * La misma pantalla con una cuenta y con doscientas.
+ *
+ * Medido antes de tocar nada, inyectando cuentas falsas y midiendo el render
+ * real: con 20 cuentas la lista media 1.776 px; con 200, 16.581 px y 495
+ * botones. El pintado tardaba 8 ms, o sea que nunca fue un problema de
+ * velocidad: eran veinte pantallas de scroll sin buscador, sin filtro y sin
+ * forma de pausar diez de golpe.
+ *
+ * Pero meter buscador y filtros a quien tiene tres cuentas es peor que no
+ * tenerlos: son tres controles para elegir entre tres cosas que ya se ven
+ * enteras. Por eso el umbral: por debajo, la lista de siempre; a partir de
+ * ahi, las herramientas. Nadie tiene que aprender nada hasta que le hace
+ * falta.
+ */
+const CUENTAS_UMBRAL = 6;
+
+/*
+ * Cuantas filas se pintan como mucho.
+ *
+ * Con doscientas cuentas y sin filtrar, la lista mide dieciseis mil
+ * setecientos pixeles: veinte pantallas de scroll. El buscador y los filtros
+ * de arriba resuelven el caso de "quiero esta cuenta", pero el primer vistazo
+ * seguia siendo un muro.
+ *
+ * Se corta en cincuenta y se dice cuantas quedan fuera. No es virtualizar:
+ * virtualizar mantiene el scroll de las doscientas y aqui eso no aporta nada,
+ * porque nadie recorre doscientas cuentas con la rueda. Lo que se hace con
+ * doscientas cuentas es BUSCAR una, y para eso esta la barra.
+ */
+const CUENTAS_MAX_FILAS = 50;
+
+/** Normaliza para buscar: sin acentos y sin mayusculas. */
+function planoCuenta(t) {
+  return String(t ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+/** Las cuentas que pasan el buscador y los filtros de ahora mismo. */
+function cuentasVisibles(todas) {
+  const f = state.filtroCuentas;
+  const q = planoCuenta(f.texto).split(' ').filter(Boolean);
+  return todas.filter(c => {
+    if (f.estado === 'activas' && !c.activa) return false;
+    if (f.estado === 'pausadas' && c.activa) return false;
+    if (f.estado === 'sin-enlazar' && c.tiktok) return false;
+    if (f.cliente === 'sin' && c.clienteId) return false;
+    if (f.cliente !== '' && f.cliente !== 'sin' && c.clienteId !== f.cliente) return false;
+    if (q.length === 0) return true;
+    const texto = planoCuenta(c.id + ' ' + (c.tiktok ?? ''));
+    return q.every(p => texto.includes(p));
+  });
+}
+
+/** Una fila de cuenta. Es lo que habia, mas la casilla cuando toca. */
+function filaCuenta(c, nombre, porUploadPost, conCasilla) {
+  return '<li' + (c.activa ? '' : ' style="opacity:.55"') + '>' +
+    (conCasilla
+      ? '<label class="marca-cuenta"><input type="checkbox" data-ccheck="' + esc(c.id) + '"' +
+        (state.selCuentas.has(c.id) ? ' checked' : '') +
+        ' aria-label="Marcar ' + esc(c.id) + '"></label>'
+      : '') +
+    '<span class="punto-estado ' + (c.activa ? 'si' : 'no') + '"></span>' +
+    '<span class="nombre">' + esc(c.id) + '</span>' +
+    (c.activa ? '' : '<span class="badge">en pausa</span>') +
+    (c.tiktok
+      ? '<span class="badge ok">@' + esc(c.tiktok) + '</span>'
+      : (porUploadPost ? '' : '<span class="badge">sin enlazar</span>')) +
+    (c.clienteId
+      ? '<span class="badge">' + esc(nombre[c.clienteId] ?? '?') + '</span>'
+      : '') +
+    (c.activa
+      ? '<button class="chip" data-cpausar="' + esc(c.id) + '">Pausar</button>'
+      : '<button class="chip" data-cactivar="' + esc(c.id) + '">Activar</button>' +
+        // Borrar solo se ofrece en las pausadas: una cuenta en uso no se
+        // borra por accidente, y el servidor rechaza igualmente las que
+        // tengan historial o permiso guardado.
+        '<button class="chip" data-cborrar="' + esc(c.id) + '">Borrar</button>') +
+    (c.tiktok
+      ? '<button class="chip" data-crevisar="' + esc(c.id) + '">Comprobar</button>' +
+        '<button class="chip" data-colvidar="' + esc(c.id) + '">Desenlazar</button>'
+      : (porUploadPost
+          ? ''
+          : '<button class="chip" data-cenlazar="' + esc(c.id) + '">Enlazar</button>')) +
+  '</li>';
+}
+
+/** Buscador, filtros y barra de lotes. Solo a partir del umbral. */
+function herramientasCuentas(todas, clientes) {
+  const f = state.filtroCuentas;
+  const activas = todas.filter(c => c.activa).length;
+  const sinEnlazar = todas.filter(c => !c.tiktok).length;
+
+  const opcion = (v, t, puesto) =>
+    '<option value="' + v + '"' + (puesto === v ? ' selected' : '') + '>' + t + '</option>';
+
+  /*
+   * Una linea de resumen que ADEMAS filtra.
+   *
+   * El encargo pedia "18 activas, 2 necesitan reconexion" llevando directo a
+   * resolverlo. Aqui el resumen y el filtro son lo mismo: pulsar "en pausa"
+   * deja en pantalla solo esas, que es lo que se iba a hacer a continuacion.
+   */
+  return '<div class="cuentas-barra">' +
+      '<input type="search" id="buscar-cuenta" placeholder="Buscar por nombre o arroba"' +
+        ' value="' + esc(f.texto) + '" autocomplete="off" spellcheck="false">' +
+      '<select data-cfiltro="estado">' +
+        opcion('', 'Todas (' + todas.length + ')', f.estado) +
+        opcion('activas', 'Activas (' + activas + ')', f.estado) +
+        opcion('pausadas', 'En pausa (' + (todas.length - activas) + ')', f.estado) +
+        opcion('sin-enlazar', 'Sin enlazar (' + sinEnlazar + ')', f.estado) +
+      '</select>' +
+      (clientes.length > 0
+        ? '<select data-cfiltro="cliente">' +
+            opcion('', 'Cualquier cliente', f.cliente) +
+            opcion('sin', 'Sin asignar', f.cliente) +
+            clientes.map(c => opcion(c.id, c.nombre, f.cliente)).join('') +
+          '</select>'
+        : '') +
+    '</div>';
+}
+
+/** La barra de acciones en lote, visible solo con algo marcado. */
+function loteCuentas(clientes) {
+  const n = state.selCuentas.size;
+  return '<div class="lote' + (n === 0 ? '' : ' puesta') + '"' + (n === 0 ? ' hidden' : '') + '>' +
+      '<span class="cuantos">' + plural(n, 'cuenta') + '</span>' +
+      '<button class="chip" data-clote="activar">Activar</button>' +
+      '<button class="chip" data-clote="pausar">Pausar</button>' +
+      (clientes.length > 0
+        ? '<select data-clote-cliente>' +
+            '<option value="">Asignar a cliente...</option>' +
+            '<option value="sin">Quitar el cliente</option>' +
+            clientes.map(c => '<option value="' + esc(c.id) + '">' + esc(c.nombre) + '</option>').join('') +
+          '</select>'
+        : '') +
+      '<span class="hueco"></span>' +
+      '<button class="chip" data-cnada>Quitar la marca</button>' +
+    '</div>';
+}
+
+// --- Buscar, filtrar y actuar en lote sobre las cuentas --------------------
+
+/*
+ * El buscador NO repinta la pantalla entera.
+ *
+ * vistaPlataformas() vuelve a construir el HTML de la seccion, y eso recrea el
+ * propio campo de texto: al teclear la segunda letra el foco ya no esta
+ * dentro. Se repinta solo la lista y se le devuelve el cursor donde estaba.
+ */
+function repintarCuentas() {
+  const vista = document.getElementById('view');
+  if (!vista || state.view !== 'plataformas') return;
+  const campo = document.getElementById('buscar-cuenta');
+  const cursor = campo ? campo.selectionStart : null;
+  vista.innerHTML = vistaPlataformas();
+  const intro = INTROS[state.view];
+  if (intro) vista.insertAdjacentHTML('afterbegin', '<p class="intro ancho">' + esc(intro) + '</p>');
+  const nuevo = document.getElementById('buscar-cuenta');
+  if (nuevo && campo) {
+    nuevo.focus();
+    if (cursor !== null) nuevo.setSelectionRange(cursor, cursor);
+  }
+}
+
+document.addEventListener('input', e => {
+  if (e.target.id !== 'buscar-cuenta') return;
+  state.filtroCuentas.texto = e.target.value;
+  repintarCuentas();
+});
+
+document.addEventListener('change', e => {
+  const f = e.target.closest('[data-cfiltro]');
+  if (f) {
+    state.filtroCuentas[f.dataset.cfiltro] = f.value;
+    repintarCuentas();
+    return;
+  }
+
+  const asignar = e.target.closest('[data-clote-cliente]');
+  if (asignar && asignar.value !== '') {
+    const clienteId = asignar.value === 'sin' ? null : asignar.value;
+    loteCuentasAccion('cliente', clienteId);
+    asignar.value = '';
+  }
+});
+
+document.addEventListener('click', e => {
+  if (state.view !== 'plataformas') return;
+
+  const casilla = e.target.closest('[data-ccheck]');
+  if (casilla) {
+    const id = casilla.dataset.ccheck;
+    if (casilla.checked) state.selCuentas.add(id);
+    else state.selCuentas.delete(id);
+    repintarCuentas();
+    return;
+  }
+
+  if (e.target.closest('[data-ctodas]')) {
+    for (const c of cuentasVisibles(state.proyectos?.cuentas ?? [])) state.selCuentas.add(c.id);
+    repintarCuentas();
+    return;
+  }
+
+  if (e.target.closest('[data-cnada]')) {
+    state.selCuentas.clear();
+    repintarCuentas();
+    return;
+  }
+
+  const lote = e.target.closest('[data-clote]');
+  if (lote) loteCuentasAccion(lote.dataset.clote, null);
+});
+
+/**
+ * Aplica una accion a todas las cuentas marcadas.
+ *
+ * Una peticion por cuenta y no una sola con la lista: el servidor ya tiene
+ * las acciones de una en una, probadas y con sus reglas (una cuenta con
+ * historial no se borra, pausar recalcula franjas). Inventar un endpoint de
+ * lote duplicaria esas reglas en dos sitios para ahorrar unas peticiones que
+ * aqui no cuestan nada: son decenas, no miles, y las lanza una persona
+ * pulsando un boton.
+ *
+ * Se mandan EN SERIE. En paralelo, veinte escrituras simultaneas sobre la
+ * misma tabla de franjas se pisarian entre ellas.
+ */
+async function loteCuentasAccion(accion, clienteId) {
+  const ids = [...state.selCuentas];
+  if (ids.length === 0) return;
+
+  const barra = document.querySelector('.lote');
+  if (barra) for (const b of barra.querySelectorAll('button, select')) b.disabled = true;
+
+  let hechas = 0;
+  const fallos = [];
+  for (const id of ids) {
+    try {
+      if (accion === 'cliente') {
+        await api('/api/proyectos', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          // El servidor llama a este campo destino, no clienteId.
+          body: JSON.stringify({ accion: 'asignar-cuenta', id, destino: clienteId }),
+        });
+      } else {
+        await api('/api/cuentas', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ accion, id }),
+        });
+      }
+      hechas += 1;
+    } catch (err) {
+      fallos.push(id + ': ' + err.message);
+    }
+  }
+
+  state.selCuentas.clear();
+  // Se dicen las que fallaron, no solo las que salieron. Un "listo" despues de
+  // mandar veinte cuando entraron dieciocho es como no decir nada.
+  avisar(
+    plural(hechas, 'cuenta') + ' ' +
+    (accion === 'pausar' ? 'en pausa' : accion === 'activar' ? 'activada' + (hechas === 1 ? '' : 's') : 'reasignada' + (hechas === 1 ? '' : 's')) +
+    (fallos.length > 0 ? '. ' + plural(fallos.length, 'fallo') + ': ' + fallos[0] : '.'),
+  );
+  await refrescar();
+}
+
+// --- El tope de cuentas, por plan de upload-post --------------------------
+
+/*
+ * El tope ya no se teclea: se elige el plan y el cupo viene con el.
+ *
+ * Quien decide cuantas cuentas caben no es este programa, es el plan
+ * contratado. Una cuenta por encima del cupo es una que falla al publicar
+ * porque no tiene perfil al otro lado, y lo que llega es un rechazo del
+ * proveedor, no un "te falta plan".
+ *
+ * La tabla de planes la manda el servidor (publish/planes.ts). Aqui no hay
+ * ninguna copia: duplicarla seria asegurarse de que un dia digan cosas
+ * distintas.
+ */
+
+/** Una opcion por plan, con lo que cuesta y cuantos perfiles trae. */
+function opcionesPlan(d, actual) {
+  const planes = d.planes ?? [];
+  const n = Number(actual);
+
+  const opts = planes.map(p =>
+    '<option value="' + p.perfiles + '"' + (n === p.perfiles ? ' selected' : '') + '>' +
+      esc(p.nombre) + ' - ' + p.perfiles + ' cuenta' + (p.perfiles === 1 ? '' : 's') +
+      ' - ' + (p.usd === 0 ? 'gratis' : p.usd + ' USD al mes') +
+    '</option>'
+  ).join('');
+
+  /*
+   * Si el tope guardado no es el de ningun plan, se añade su propia opcion.
+   *
+   * Pasa cuando upload-post cambia los cupos, cuando se publica por la API
+   * propia de TikTok (donde estos planes no pintan nada) o cuando alguien lo
+   * dejo en 100 antes de que esto existiera. Sin esta opcion el desplegable
+   * se abriria mostrando un plan que no es el que esta guardado, y guardar
+   * cualquier otra cosa cambiaria el tope sin que nadie lo pidiera.
+   */
+  const suelto = Number.isFinite(n) && !planes.some(p => p.perfiles === n)
+    ? '<option value="' + n + '" selected>A mano - ' + n + ' cuentas</option>'
+    : '';
+
+  return opts + suelto;
+}
+
+/** Lo que implica el plan elegido, debajo del desplegable. */
+function notaDelPlan(d, actual) {
+  const planes = d.planes ?? [];
+  const n = Number(actual);
+  const plan = planes.find(p => p.perfiles === n);
+  const creadas = d.cuentas?.creadas ?? 0;
+
+  const trozos = [];
+
+  /*
+   * Con la API propia de TikTok, estos planes no pintan nada.
+   *
+   * upload-post cobra por perfiles; la API propia no tiene perfiles que
+   * comprar, cada cuenta autoriza la app directamente. Enseñar precios de un
+   * servicio que no se esta usando haria creer que hay que pagarlos.
+   */
+  if ((d.proveedor ?? 'upload-post') !== 'upload-post') {
+    return '<p class="reason" style="margin:var(--s2) 0 0">' +
+      'Estas publicando por la API de TikTok, no por upload-post, asi que estos planes ' +
+      'no te afectan: el tope es solo tuyo. Cada cuenta autoriza la app por su cuenta.' +
+    '</p>';
+  }
+
+  // El aviso del plan va primero y en ambar: es lo unico que puede dejar el
+  // programa sin publicar.
+  if (plan?.aviso) {
+    trozos.push('<p class="warn" style="margin:var(--s2) 0 0">' + esc(plan.aviso) + '</p>');
+  }
+
+  /*
+   * Si ya tienes mas cuentas que el cupo, se dice y se dice cuantas sobran.
+   *
+   * El servidor impide CREAR por encima del tope, pero no borra las que ya
+   * existian: bajar de plan con veinte creadas no las hace desaparecer, las
+   * deja sin perfil al otro lado. Eso hay que verlo aqui y no descubrirlo en
+   * el primer fallo de publicacion.
+   */
+  if (Number.isFinite(n) && creadas > n) {
+    trozos.push(
+      '<p class="warn" style="margin:var(--s2) 0 0">' +
+        'Tienes ' + creadas + ' cuentas creadas y este plan admite ' + n + '. ' +
+        'Las ' + (creadas - n) + ' que sobran fallaran al publicar hasta que las borres ' +
+        'o subas de plan.' +
+      '</p>',
+    );
+  } else if (Number.isFinite(n)) {
+    const libres = n - creadas;
+    const hueco = libres > 0
+      ? 'Te quedan ' + plural(libres, 'cuenta') + ' por crear.'
+      : 'Has llegado al tope.';
+    trozos.push(
+      '<p class="reason" style="margin:var(--s2) 0 0">' + hueco + ' ' +
+        (plan === undefined
+          // Un tope que no es de ningun plan: puede venir de un cambio de
+          // precios de upload-post, de publicar por la API propia de TikTok o
+          // de haberlo puesto a mano. Las tres son legitimas y ninguna
+          // merece un aviso, pero si decir que nadie lo esta respaldando.
+          ? 'Este tope no corresponde a ningun plan de upload-post: lo pusiste a mano.'
+          : 'Cambiar esto aqui NO cambia tu plan en upload-post: hay que contratarlo alli.') +
+      '</p>',
+    );
+  }
+
+  return trozos.join('');
+}
+`

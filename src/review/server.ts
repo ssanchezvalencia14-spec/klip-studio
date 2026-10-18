@@ -719,6 +719,9 @@ async function buildOverview(
       return acc
     }, {}),
     activeJob: enMarcha(jobs),
+    // Si el ordenador que procesa esta escuchando. Viaja siempre para que el
+    // panel pueda avisar ANTES de que alguien pegue un enlace, no despues.
+    trabajador: await cola.trabajadorVivo(),
     /*
      * El objetivo diario, calculado sobre las cuentas QUE HAY.
      *
@@ -2133,26 +2136,31 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     const body = (await readBody(req)) as { kind?: unknown; params?: Record<string, unknown> }
 
     /*
-     * Casi ningun trabajo puede correr en el panel remoto, y hay que decirlo
-     * ANTES de encolarlo.
+     * EL PANEL REMOTO SI PUEDE ENCOLAR. Esto antes lo prohibia, y era un error.
      *
-     * Descargar, transcribir, cortar y subir necesitan yt-dlp, ffmpeg, la
-     * tarjeta grafica y los MP4 en disco. En Hostinger no hay nada de eso: la
-     * tarea se encolaba igual, el trabajador la arrancaba y moria con un error
-     * de fichero que no le dice nada a quien pulso el boton.
+     * El razonamiento viejo era: "descargar y renderizar necesitan ffmpeg y la
+     * tarjeta grafica, y en Hostinger no hay ninguna de las dos". Cierto, pero
+     * irrelevante: el panel no ejecuta nada. Escribe la tarea en la tabla
+     * `jobs` y el trabajador de casa la recoge cuando pregunta -- es el PC
+     * quien pregunta, no el servidor quien llama. Encolar desde el movil y que
+     * el ordenador lo procese es exactamente como esta pensado el sistema.
      *
-     * `metrics` si funciona: habla con la API de TikTok y escribe en la base,
-     * sin tocar disco.
+     * De donde venia el error: cuando se escribio, el servidor del panel
+     * ejecutaba los trabajos EL MISMO, en su propio proceso. Ahi si moria. Al
+     * mover la cola a Postgres con un trabajador aparte, esta comprobacion
+     * dejo de tener sentido y nadie la quito. El sintoma era que pegar un
+     * enlace de YouTube desde el telefono contestaba "lanzala desde el
+     * ordenador que hace el trabajo", que es justo lo que uno NO quiere tener
+     * que hacer.
+     *
+     * Lo que SI sigue sin poder hacerse en remoto es subir un fichero, porque
+     * ahi el video tiene que acabar en un disco que el trabajador pueda leer.
+     * Eso lo cubre la comprobacion propia de /api/upload, mas arriba.
+     *
+     * Si no hay ningun trabajador escuchando, la tarea se encola igual y se
+     * avisa: queda esperando a que enciendas el ordenador, que es un estado
+     * legitimo y muy distinto de un fallo.
      */
-    const REMOTOS_OK = new Set(['metrics'])
-    if (esRemoto() && !REMOTOS_OK.has(String(body.kind))) {
-      sendJson(res, 501, {
-        error:
-          'Esta tarea necesita los videos y la tarjeta grafica, y este panel corre en un ' +
-          'servidor que no los tiene. Lanzala desde el ordenador que hace el trabajo.',
-      })
-      return
-    }
 
     try {
       // La lista de VOD conocidos sale de la base, que es la unica que el panel
@@ -2168,7 +2176,15 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       )
       const job = await cola.encolar(built.kind, built.args, built.label)
       avisarCambio('trabajos')
-      sendJson(res, 202, job)
+      /*
+       * Se devuelve si hay alguien al otro lado para recogerla.
+       *
+       * Sin esto, encolar desde el movil con el ordenador apagado se veria
+       * exactamente igual que encolar con el encendido: un 202 y una tarea
+       * que no avanza nunca. El panel usa este dato para decirlo en el acto.
+       */
+      const trabajador = await cola.trabajadorVivo()
+      sendJson(res, 202, { ...job, trabajador })
     } catch (error) {
       if (error instanceof BadRequest) {
         sendJson(res, 400, { error: error.message })

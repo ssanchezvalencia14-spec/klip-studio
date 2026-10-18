@@ -367,23 +367,51 @@ check(
 // --- 8. Encolar tareas, no ejecutarlas --------------------------------------
 
 /*
- * Primero, la guarda del modo remoto.
+ * EL PANEL REMOTO ENCOLA. Esta prueba comprobaba lo contrario.
  *
- * En Hostinger no hay ffmpeg ni los MP4, asi que encolar un render alli deja
- * una tarea que muere con un error de fichero sin relacion aparente con el
- * boton que se pulso. Se comprueba ANTES de bajar el modo porque el resto de
- * esta seccion necesita el panel en local.
+ * Decia que en remoto un render tenia que devolver 501, porque en Hostinger no
+ * hay ffmpeg. La premisa estaba mal: el panel no ejecuta nada, escribe la
+ * tarea en la tabla y el trabajador de casa la recoge. Mientras la prueba
+ * defendio aquel 501, pegar un enlace desde el movil contestaba "lanzala desde
+ * el ordenador que hace el trabajo", que es justo lo que no se quiere.
+ *
+ * Lo que si tiene que hacer es DECIR si hay alguien escuchando, para que una
+ * tarea que va a esperar tres dias no se vea igual que una que empieza ya.
  */
-const remotoBloquea = await pedir('/api/jobs', {
+const remotoEncola = await pedir('/api/jobs', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ kind: 'render', params: { sourceId: 'vod-uno' } }),
 })
 check(
-  'El panel remoto rechaza las tareas que necesitan los videos',
-  remotoBloquea.status === 501 && typeof remotoBloquea.body.error === 'string',
-  `${remotoBloquea.status}: ${remotoBloquea.body.error ?? ''}`,
+  'El panel remoto encola y dice si hay quien lo recoja',
+  remotoEncola.status === 202 &&
+    typeof remotoEncola.body?.trabajador?.vivo === 'boolean' &&
+    // Sin ningun trabajador latiendo, tiene que decir que no hay nadie.
+    remotoEncola.body.trabajador.vivo === false,
+  `${remotoEncola.status} vivo=${remotoEncola.body?.trabajador?.vivo}`,
 )
+
+/*
+ * Y la tarea queda esperando de verdad, no se pierde.
+ */
+const [esperando] = await db.query<{ status: string; kind: string }>(
+  `select status, kind from jobs where owner_id = $1 and kind = 'render'`,
+  [OWNER],
+)
+check(
+  'La tarea encolada en remoto queda esperando al trabajador',
+  esperando?.status === 'queued',
+  `${esperando?.kind} -> ${esperando?.status}`,
+)
+
+/*
+ * Se borra antes de seguir: la siguiente prueba busca "el render" por su tipo
+ * y con dos en la tabla leeria el que no es. Lo descubrio este mismo cambio,
+ * cuando el remoto paso de rechazar a encolar y la prueba de los argumentos
+ * empezo a leer la tarea sin --limit.
+ */
+await db.query(`delete from jobs where owner_id = $1 and kind = 'render'`, [OWNER])
 
 // El resto de la seccion va en modo local: es donde esas tareas corren de
 // verdad. esRemoto() se lee en cada peticion, asi que basta con cambiarlo.

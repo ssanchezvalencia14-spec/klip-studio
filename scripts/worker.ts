@@ -168,6 +168,16 @@ log.info(`Trabajador ${YO} en marcha. Preguntando cada ${INTERVALO_MS / 1000}s.`
 let ocioso = 0
 while (!parando) {
   try {
+    /*
+     * Lo primero: decir que estoy aqui.
+     *
+     * Antes de mirar si hay trabajo, porque el dato que hace falta al otro
+     * lado es precisamente "hay alguien escuchando AUNQUE no haya nada que
+     * hacer". Sin esto, el panel no podia distinguir un PC apagado de uno
+     * encendido y ocioso, y por eso se negaba a encolar desde el movil.
+     */
+    await cola.latirTrabajador(YO)
+
     // Antes de coger nada, se rescatan las que otro trabajador dejo colgadas.
     const { devueltas, rendidas } = await cola.recuperarPerdidas()
     if (devueltas > 0) log.warn(`${devueltas} tarea(s) perdidas devueltas a la cola`)

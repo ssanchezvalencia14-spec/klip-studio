@@ -122,6 +122,50 @@ export function createCola(db: Db, ownerId: string) {
       return filas[0] === undefined ? null : aJob(filas[0] as Record<string, unknown>)
     },
 
+    /*
+     * Dice "sigo aqui", haya trabajo o no.
+     *
+     * Es distinto del latido de una TAREA: aquel solo existe mientras algo
+     * corre, asi que con la cola vacia no se podia distinguir un PC apagado de
+     * uno encendido sin nada que hacer. Esa diferencia es justo la que hay que
+     * enseñar a quien encola desde el movil.
+     */
+    async latirTrabajador(trabajador: string): Promise<void> {
+      await db.query(
+        `insert into trabajadores (id, owner_id, visto_en)
+         values ($2, $1, now())
+         on conflict (owner_id, id) do update set visto_en = now()`,
+        [ownerId, trabajador],
+      )
+    },
+
+    /**
+     * Cuando se vio por ultima vez algun trabajador, y si cuenta como vivo.
+     *
+     * El margen es generoso a proposito: el trabajador pregunta cada cinco
+     * segundos, pero una pasada larga de ffmpeg puede dejarlo sin latir un
+     * rato, y una conexion domestica se cae y vuelve. Minuto y medio distingue
+     * "apagado" de "ocupado" sin dar falsos avisos.
+     */
+    async trabajadorVivo(): Promise<{ vivo: boolean; vistoEn: string | null; id: string | null }> {
+      const filas = await db.query<{ id: string; visto_en: string; vivo: boolean }>(
+        `select id, visto_en,
+                (visto_en > now() - interval '90 seconds') as vivo
+           from trabajadores
+          where owner_id = $1
+          order by visto_en desc
+          limit 1`,
+        [ownerId],
+      )
+      const f = filas[0]
+      if (f === undefined) return { vivo: false, vistoEn: null, id: null }
+      return {
+        vivo: Boolean(f.vivo),
+        vistoEn: new Date(f.visto_en).toISOString(),
+        id: f.id,
+      }
+    },
+
     /** Da señales de vida y publica la ultima linea de salida. */
     async latir(id: string, ultimaLinea: string, log: string[]): Promise<void> {
       await db.query(

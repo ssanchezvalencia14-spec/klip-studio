@@ -1014,6 +1014,24 @@ function vistaProceso() {
 
   html += seccion('&#43;', 'Añadir un video', 'Pega un enlace de YouTube o sube un MP4. El programa lo descarga, saca el texto y busca los mejores momentos.') +
     '<article class="card"><div class="body">' +
+      /*
+       * Si no hay ordenador escuchando, se dice ANTES de pegar el enlace.
+       *
+       * Descargar y renderizar los hace el PC de casa, no el servidor: el
+       * panel solo apunta la tarea. Encolarla con el ordenador apagado es
+       * legitimo -- se procesa en cuanto lo enciendas -- pero verlo despues,
+       * mirando una tarea que no avanza, es lo que hace pensar que esta roto.
+       */
+      (o.trabajador && !o.trabajador.vivo
+        ? '<p class="warn" style="margin:0 0 var(--s3)">' +
+            'El ordenador que procesa los videos no esta escuchando' +
+            (o.trabajador.vistoEn
+              ? ' (visto por ultima vez ' + hace(o.trabajador.vistoEn) + ')'
+              : ' todavia') +
+            '. Puedes añadir el video igual: se quedara esperando y empezara ' +
+            'en cuanto lo enciendas.' +
+          '</p>'
+        : '') +
       selectorCampana +
       '<div class="field">' +
         '<label>Pega un enlace</label>' +
@@ -3092,13 +3110,24 @@ async function decide(card, status) {
 
 async function lanzar(kind, params) {
   try {
-    await api('/api/jobs', {
+    const r = await api('/api/jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ kind, params: params ?? {} }),
     });
+    /*
+     * Se confirma lo que acaba de pasar, y se distingue encolar de empezar.
+     *
+     * Un aviso en vez de nada: el boton deja de verse pulsado y la tarea
+     * aparece en la lista, pero si el ordenador esta apagado la lista no se
+     * mueve y eso se lee como que no funciono. Decirlo aqui es la diferencia
+     * entre "esta roto" y "esta esperando".
+     */
+    if (r?.trabajador && !r.trabajador.vivo) {
+      avisar('Apuntado. Empezara en cuanto enciendas el ordenador que procesa los videos.');
+    }
   } catch (error) {
-    alert(error.message);
+    avisar(error.message);
   }
   await refrescar();
 }

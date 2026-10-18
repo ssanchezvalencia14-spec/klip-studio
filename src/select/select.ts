@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { clasificarFallo, type FalloSelect } from './fallo.js'
 import { join } from 'node:path'
 import { optionalEnv, requireEnv } from '../lib/env.js'
 import { workDir, writeJson } from '../lib/fsx.js'
@@ -57,6 +58,12 @@ export interface SelectResult {
    * desde el panel se leia como que el video no daba para nada.
    */
   fallidas: number
+  /**
+   * Por que se corto, si se corto por algo que se iba a repetir.
+   *
+   * Lo usa el guion para decir QUE hacer en vez de "mira el registro".
+   */
+  motivoCorte?: FalloSelect
   usage: { inputTokens: number; outputTokens: number; estimatedUsd: number | null }
   elapsedMs: number
 }
@@ -110,6 +117,8 @@ async function selectFromWindow(
   outputTokens: number
   /** La ventana no llego a responder. Distinto de responder y no dar clips. */
   fallo: boolean
+  /** Por que fallo, cuando fallo. Sirve para no repetir lo irrepetible. */
+  motivo?: FalloSelect
 }> {
   const prompt = buildWindowPrompt({
     window,
@@ -124,12 +133,15 @@ async function selectFromWindow(
   try {
     result = await provider.select(SELECTION_SYSTEM_PROMPT, prompt)
   } catch (error) {
-    // Una ventana que falla no debe tumbar el VOD entero: las demas siguen
-    // aportando candidatos.
-    log.warn(
-      `Ventana ${window.index}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
-    )
-    return { candidates: [], inputTokens: 0, outputTokens: 0, fallo: true }
+    /*
+     * Una ventana que falla no debe tumbar el VOD entero: las demas siguen
+     * aportando candidatos. PERO hay fallos que no son de la ventana sino de
+     * la configuracion -- la clave, el saldo, el modelo -- y esos se repiten
+     * identicos en todas. Se clasifican aqui y quien llama decide si sigue.
+     */
+    const motivo = clasificarFallo(error)
+    log.warn(`Ventana ${window.index}: ${motivo.mensaje}`)
+    return { candidates: [], inputTokens: 0, outputTokens: 0, fallo: true, motivo }
   }
 
   const { inputTokens, outputTokens } = result
@@ -180,6 +192,7 @@ export async function selectClips(
   let inputTokens = 0
   let outputTokens = 0
   let fallidas = 0
+  let motivoCorte: FalloSelect | undefined
 
   // En serie a proposito: son pocas llamadas, el paralelismo no cambia la
   // experiencia y en cambio complica el manejo de limites de peticiones.
@@ -195,6 +208,24 @@ export async function selectClips(
     inputTokens += result.inputTokens
     outputTokens += result.outputTokens
     if (result.fallo) fallidas += 1
+
+    /*
+     * Corte en seco cuando el fallo no depende de la ventana.
+     *
+     * Con la clave rechazada, seguir es gastar una llamada por ventana para
+     * recibir exactamente el mismo 401. Un VOD de tres horas son doce
+     * ventanas y doce copias del mismo error, que ademas entierran la unica
+     * linea que explica que pasa.
+     */
+    if (result.motivo?.definitivo === true) {
+      motivoCorte = result.motivo
+      log.error(result.motivo.mensaje)
+      const quedan = windows.length - window.index - 1
+      if (quedan > 0) {
+        log.warn(`No se intentan las ${quedan} ventana(s) restantes: fallarian igual.`)
+      }
+      break
+    }
   }
 
   const clips = dedupe(all)
@@ -205,13 +236,31 @@ export async function selectClips(
       ? null
       : (inputTokens / 1_000_000) * price.input + (outputTokens / 1_000_000) * price.output
 
-  writeJson(join(workDir(transcript.sourceId), 'clips.json'), {
-    sourceId: transcript.sourceId,
-    model: provider.model,
-    provider: provider.name,
-    generatedFromWindows: windows.length,
-    clips,
-  })
+  /*
+   * NO se escribe clips.json cuando no se pudo ni preguntar.
+   *
+   * Se escribia siempre, tambien con cero clips, asi que relanzar la
+   * seleccion con la clave caducada MACHACABA los momentos buenos de una
+   * pasada anterior y los dejaba en una lista vacia. El VOD seguia ahi, la
+   * transcripcion tambien, pero el trabajo de eleccion se perdia y habia que
+   * pagarlo otra vez.
+   *
+   * La condicion es "no respondio NINGUNA ventana", no "salieron cero clips":
+   * un VOD que se consulta entero y de verdad no da para nada es un resultado
+   * legitimo, y ese si tiene que quedar escrito para no volver a intentarlo.
+   */
+  const nadieRespondio = motivoCorte !== undefined || (fallidas === windows.length && windows.length > 0)
+  if (nadieRespondio) {
+    log.warn('No se toca clips.json: no se pudo preguntar, asi que lo que hubiera sigue valiendo.')
+  } else {
+    writeJson(join(workDir(transcript.sourceId), 'clips.json'), {
+      sourceId: transcript.sourceId,
+      model: provider.model,
+      provider: provider.name,
+      generatedFromWindows: windows.length,
+      clips,
+    })
+  }
 
   const elapsedMs = performance.now() - startedAt
   log.info(`${clips.length} clip(s) tras deduplicar, en ${formatDuration(elapsedMs)}`)
@@ -220,6 +269,7 @@ export async function selectClips(
     clips,
     windows: windows.length,
     fallidas,
+    ...(motivoCorte === undefined ? {} : { motivoCorte }),
     usage: { inputTokens, outputTokens, estimatedUsd },
     elapsedMs,
   }

@@ -126,7 +126,18 @@ async function main(): Promise<void> {
    * Se distingue de 'respondio y no encontro nada', que si es un resultado
    * legitimo y sigue saliendo con exito.
    */
-  if (result.fallidas === result.windows && result.windows > 0) {
+  /*
+   * O fallaron todas, O se corto en seco por un motivo que iba a repetirse.
+   *
+   * La segunda mitad hay que ponerla explicita: desde que el bucle corta al
+   * primer fallo definitivo, `fallidas` vale 1 y `windows` 3, asi que la
+   * igualdad de la izquierda ya no se cumple. Sin esto, un VOD con la clave
+   * rechazada terminaba en EXITO con cero clips -- peor que el fallo
+   * original, porque nadie mira un trabajo que salio bien.
+   */
+  const noSePudoPreguntar =
+    result.motivoCorte !== undefined || (result.fallidas === result.windows && result.windows > 0)
+  if (noSePudoPreguntar) {
     console.error('')
     /*
      * La salida se nombra por su boton, no por su comando.
@@ -137,9 +148,22 @@ async function main(): Promise<void> {
      * atajo es ahora un boton en la ficha del video.
      */
     console.error('Ninguna ventana llego a responder: no es que el video no diera para clips,')
-    console.error('es que no se pudo preguntar. Mira el registro de arriba para ver el motivo.')
-    console.error('Si fue por saldo de la API y el video es musica, en su ficha tienes el')
-    console.error('boton "Es musica: buscar estribillos", que no gasta saldo.')
+    console.error('es que no se pudo preguntar.')
+    console.error('')
+    /*
+     * El motivo concreto, si se supo, en lugar de "mira el registro".
+     *
+     * El registro esta justo encima, si, pero lleva una linea por ventana con
+     * el JSON crudo del proveedor. La frase que dice QUE hacer tiene que
+     * estar al final, que es donde mira quien pulso el boton.
+     */
+    if (result.motivoCorte !== undefined) {
+      console.error(result.motivoCorte.mensaje)
+    } else {
+      console.error('Mira el registro de arriba para ver el motivo.')
+      console.error('Si fue por saldo de la API y el video es musica, en su ficha tienes el')
+      console.error('boton "Es musica: buscar estribillos", que no gasta saldo.')
+    }
     process.exitCode = 1
     return
   }

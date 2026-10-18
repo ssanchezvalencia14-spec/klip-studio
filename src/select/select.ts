@@ -49,6 +49,8 @@ const PRICING: Record<string, { input: number; output: number }> = {
 }
 
 export interface SelectOptions {
+  /** 'anthropic' o 'local'. Sin esto, lo que diga el entorno o la API. */
+  selector?: string
   maxClipsPerWindow?: number
   minDurationSec?: number
   maxDurationSec?: number
@@ -98,8 +100,19 @@ export interface SelectResult {
  * Caer en eso por una linea olvidada en un fichero de configuracion cuesta
  * media hora de GPU y produce clips inservibles sin avisar de nada.
  */
-export function createSelectionProvider(): SelectionProvider {
-  if (optionalEnv('SELECT_PROVIDER') === 'ollama') {
+export function createSelectionProvider(preferido?: string): SelectionProvider {
+  /*
+   * El entorno manda sobre lo guardado, igual que con el proveedor de
+   * publicacion: para una prueba suelta desde consola es mas comodo exportar
+   * una variable que tocar la base.
+   *
+   * `preferido` viene de Ajustes y usa los nombres del panel ('local'), no el
+   * del motor ('ollama'); se traducen aqui para no filtrar el nombre de una
+   * herramienta concreta a una pantalla que lee quien no la conoce.
+   */
+  const elegido = optionalEnv('SELECT_PROVIDER') ?? (preferido === 'local' ? 'ollama' : preferido)
+
+  if (elegido === 'ollama') {
     const ollamaModel = optionalEnv('OLLAMA_MODEL')
     if (ollamaModel === undefined) {
       throw new Error(
@@ -150,7 +163,9 @@ async function selectFromWindow(
 
   let result
   try {
-    result = await provider.select(SELECTION_SYSTEM_PROMPT, prompt)
+    // El tope viaja al proveedor: el modelo local lo necesita como gramatica,
+    // no como frase en el prompt. Ver SelectionProvider.select.
+    result = await provider.select(SELECTION_SYSTEM_PROMPT, prompt, options.maxClipsPerWindow)
   } catch (error) {
     /*
      * Una ventana que falla no debe tumbar el VOD entero: las demas siguen
@@ -187,7 +202,7 @@ export async function selectClips(
 ): Promise<SelectResult> {
   const startedAt = performance.now()
 
-  const provider = createSelectionProvider()
+  const provider = createSelectionProvider(options.selector)
 
   const limits = {
     maxClipsPerWindow: options.maxClipsPerWindow ?? 3,

@@ -2,7 +2,12 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import * as z from 'zod/v4'
 import { createLogger } from '../lib/logger.js'
-import { ClipSelectionSchema, type ClipCandidate } from './schema.js'
+import {
+  ClipCandidateSchema,
+  ClipSelectionSchema,
+  MAX_CLIPS_PER_WINDOW,
+  type ClipCandidate,
+} from './schema.js'
 
 const log = createLogger('select')
 
@@ -23,7 +28,17 @@ export interface SelectionResult {
 export interface SelectionProvider {
   readonly name: string
   readonly model: string
-  select(systemPrompt: string, userPrompt: string): Promise<SelectionResult>
+  /**
+   * `maxClips` es el tope que se le pidio a ESTA ventana.
+   *
+   * No es decorativo para el modelo local: alli el esquema se convierte en una
+   * gramatica que obliga la forma de la salida, y una gramatica que permite
+   * seis elementos no le da al modelo ninguna razon para cerrar el array en
+   * tres. Medido con qwen3:8b: generaba los 2000 tokens del tope y entregaba
+   * el JSON a medias. La ruta de Anthropic lo ignora porque alli el tope del
+   * prompt basta.
+   */
+  select(systemPrompt: string, userPrompt: string, maxClips: number): Promise<SelectionResult>
 }
 
 // --- Anthropic ---------------------------------------------------------------
@@ -37,6 +52,8 @@ export class AnthropicSelectionProvider implements SelectionProvider {
     private readonly effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max',
   ) {}
 
+  // maxClips no se usa aqui: el tope va en el texto del prompt y un modelo
+  // capaz lo respeta. Se acepta para cumplir la interfaz.
   async select(systemPrompt: string, userPrompt: string): Promise<SelectionResult> {
     const response = await this.client.messages.parse({
       model: this.model,
@@ -190,11 +207,22 @@ export function salvageTruncatedJson(text: string): { clips: unknown[] } | null 
 
   if (objects.length === 0) return null
 
-  try {
-    return { clips: objects.map((o) => JSON.parse(o) as unknown) }
-  } catch {
-    return null
+  /*
+   * Cada objeto por separado, no todos o ninguno.
+   *
+   * Estaba en un solo map dentro de un try: si UNO fallaba al parsear, el
+   * catch devolvia null y se tiraban tambien los que estaban perfectos. Es
+   * justo lo contrario de para lo que existe esta funcion.
+   */
+  const clips: unknown[] = []
+  for (const o of objects) {
+    try {
+      clips.push(JSON.parse(o) as unknown)
+    } catch {
+      // Un objeto ilegible no dice nada del siguiente.
+    }
   }
+  return clips.length === 0 ? null : { clips }
 }
 
 export class OllamaSelectionProvider implements SelectionProvider {
@@ -205,10 +233,66 @@ export class OllamaSelectionProvider implements SelectionProvider {
     private readonly baseUrl = 'http://localhost:11434',
   ) {}
 
-  async select(systemPrompt: string, userPrompt: string): Promise<SelectionResult> {
-    // El esquema se deriva del mismo objeto Zod que usa la ruta de Anthropic,
-    // asi que las dos exigen exactamente la misma forma de salida.
-    const schema = z.toJSONSchema(ClipSelectionSchema)
+  async select(
+    systemPrompt: string,
+    userPrompt: string,
+    maxClips = MAX_CLIPS_PER_WINDOW,
+  ): Promise<SelectionResult> {
+    /*
+     * El esquema se deriva del mismo objeto Zod que usa la ruta de Anthropic,
+     * pero con el array acotado a lo que se pidio de verdad.
+     *
+     * MEDIDO el 2026-10-18 con qwen3:8b sobre una ventana de 271 lineas: con
+     * la gramatica abierta a seis, generaba los 2000 tokens enteros
+     * (done_reason=length, 5864 caracteres) y el JSON llegaba partido. Dos de
+     * las tres ventanas del VOD se perdieron asi, y las dos eran las grandes,
+     * de modo que los clips salian todos del ultimo tercio del video.
+     *
+     * El tope del prompt no basta aqui: la gramatica es lo unico que el modelo
+     * no puede desobedecer.
+     */
+    /*
+     * LAS COTAS VIVEN AQUI, no en el esquema compartido.
+     *
+     * El esquema de schema.ts lo usan las DOS rutas, y la salida estructurada
+     * de Anthropic no admite minimos ni maximos -- esta avisado alli mismo.
+     * Ponerlos en el sitio comun arreglaria el modelo local y romperia la API.
+     *
+     * Para Ollama, en cambio, el esquema se convierte en una gramatica, y una
+     * gramatica sin cotas es una invitacion a no parar nunca.
+     */
+    const tope = Math.max(1, Math.min(maxClips, MAX_CLIPS_PER_WINDOW))
+    const acotado = z.object({
+      clips: z
+        .array(
+          z.object({
+            startLine: z.number().int(),
+            endLine: z.number().int(),
+            // Una cita literal de una linea del transcript no pasa de aqui.
+            hook: z.string().max(300),
+            // Una o dos frases.
+            reason: z.string().max(400),
+            // El texto pide 150; 200 deja margen y cierra la puerta.
+            caption: z.string().max(200),
+            /*
+             * EL MAXIMO DE HASHTAGS ES LO QUE EVITA EL BUCLE INFINITO.
+             *
+             * MEDIDO el 2026-10-18 con qwen3:8b sobre la ventana 1 de un VOD
+             * real: sin tope se comio los 4000 tokens repitiendo
+             * "PensamientosDeLaGeneracion", "CulturaDeLaGeneracion",
+             * "MusicaDeLaGeneracion" una y otra vez, sin llegar a cerrar NI
+             * SIQUIERA el primer clip. Quince minutos de video perdidos.
+             *
+             * Decir "entre 3 y 5" en la descripcion no basta: la descripcion
+             * es texto que el modelo puede ignorar; el maximo del array no.
+             */
+            hashtags: z.array(z.string().max(40)).max(5),
+            score: z.number(),
+          }),
+        )
+        .max(tope),
+    })
+    const schema = z.toJSONSchema(acotado)
 
     // Se pide en streaming, y no por preferencia estetica.
     //
@@ -236,10 +320,20 @@ export class OllamaSelectionProvider implements SelectionProvider {
         options: {
           num_ctx: OLLAMA_CONTEXT,
           temperature: 0.4,
-          // Tres candidatos con todos sus campos ocupan bastante menos de 2000.
-          // Con el tope alto, una generacion desbocada tardaba 23 minutos antes
-          // de rendirse; asi falla en un minuto y el rescate salva lo completo.
-          num_predict: 2000,
+          /*
+           * Margen para que seis candidatos completos quepan.
+           *
+           * Estuvo en 2000 con la cuenta de que "tres candidatos ocupan
+           * bastante menos". Cierto, pero la gramatica permitia seis y el
+           * modelo los llenaba: medido, 2000 tokens exactos y el JSON
+           * partido. Ahora la gramatica se acota al tope pedido (ver mas
+           * arriba), asi que esto es solo holgura por si el modelo es
+           * verboso: 144 tokens por clip medidos x 6 clips deja de sobra.
+           *
+           * Sigue acotado a proposito. Sin tope, una generacion desbocada
+           * tardaba 23 minutos en rendirse.
+           */
+          num_predict: 4000,
         },
       }),
     })

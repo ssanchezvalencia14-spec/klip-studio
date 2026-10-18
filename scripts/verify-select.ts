@@ -191,6 +191,50 @@ const check = (name: string, ok: boolean, detail: string): void => {
    */
 }
 
+
+// --- Rescate de una respuesta cortada ----------------------------------------
+//
+// Un modelo local que agota su tope de generacion deja el JSON partido a mitad
+// de un objeto. Los objetos ANTERIORES estan completos y son trabajo bueno: en
+// el VOD del 2026-10-18 se perdieron dos ventanas enteras por no quedarse con
+// ellos.
+{
+  const { salvageTruncatedJson } = await import('../src/select/provider.js')
+
+  const cortado = `{"clips": [
+    {"startLine": 16, "endLine": 20, "hook": "uno", "reason": "r", "caption": "c", "hashtags": ["a"], "score": 90},
+    {"startLine": 64, "endLine": 74, "hook": "dos", "reason": "r", "caption": "c", "hashtags": ["b"], "score": 80},
+    {"startLine": 192, "endLine": 2`
+  const r = salvageTruncatedJson(cortado)
+  check(
+    'De un JSON cortado se rescatan los objetos completos',
+    r !== null && r.clips.length === 2,
+    `rescatados ${r?.clips.length ?? 0} de 3`,
+  )
+
+  /*
+   * Y un objeto ilegible NO se lleva por delante a los buenos: antes, un solo
+   * JSON.parse fallido devolvia null y tiraba la ventana entera.
+   */
+  const conBasura = `{"clips": [
+    {"startLine": 1, "endLine": 9, "hook": "bueno", "reason": "r", "caption": "c", "hashtags": ["a"], "score": 70},
+    {esto no es json valido},
+    {"startLine": 20, "endLine": 30, "hook": "otro", "reason": "r", "caption": "c", "hashtags": ["b"], "score": 60}
+  ]}`
+  const r2 = salvageTruncatedJson(conBasura)
+  check(
+    'Un objeto ilegible no tira los que si valen',
+    r2 !== null && r2.clips.length === 2,
+    `rescatados ${r2?.clips.length ?? 0}`,
+  )
+
+  check(
+    'Sin ningun objeto completo se devuelve null, no un array vacio',
+    salvageTruncatedJson('{"clips": [ {"startLine": 1, "endL') === null,
+    'null',
+  )
+}
+
 // --- Reporte -----------------------------------------------------------------
 const width = Math.max(...checks.map((c) => c.name.length))
 console.log('')

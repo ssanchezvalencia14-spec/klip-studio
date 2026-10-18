@@ -73,6 +73,19 @@ export interface ClipSettings {
   /** 'direct' publica en el perfil; 'draft' lo deja en la bandeja del titular. */
   modo: string
 
+  /**
+   * Quien elige los momentos: 'anthropic' o 'local'.
+   *
+   * Vivia en SELECT_PROVIDER, dentro del .env del ordenador de casa. Cuando la
+   * clave de Anthropic quedo rechazada, procesar un VOD fallaba y la salida
+   * -- el modelo local -- exigia editar un fichero y reiniciar. Un panel que
+   * no puede cambiar de motor cuando el motor se rompe no sirve de mucho.
+   *
+   * El entorno sigue mandando sobre esto, a proposito: para una prueba suelta
+   * desde consola es mas comodo que tocar la base.
+   */
+  selector: string
+
   /*
    * ROTULO DE TITULO, quemado arriba del video.
    *
@@ -117,6 +130,7 @@ export const CLIP_DEFAULTS: ClipSettings = {
   concurrencia: 1,
   proveedor: 'upload-post',
   modo: 'direct',
+  selector: 'anthropic',
   tituloActivo: false,
   tituloTexto: '{titulo}',
   tituloArriba: 240,
@@ -160,6 +174,7 @@ type Numericos = Exclude<
   | 'privacidad'
   | 'proveedor'
   | 'modo'
+  | 'selector'
   | 'tituloActivo'
   | 'tituloTexto'
   | 'tituloColor'
@@ -210,6 +225,8 @@ const LIMITS: Record<Numericos, [number, number]> = {
 export const PROVEEDORES = ['upload-post', 'tiktok'] as const
 /** Que se hace con el video al llegar. */
 export const MODOS = ['direct', 'draft'] as const
+/** Quien elige los momentos. */
+export const SELECTORES = ['anthropic', 'local'] as const
 
 export const PRIVACIDADES = [
   'PUBLIC_TO_EVERYONE',
@@ -257,6 +274,9 @@ export function validateClipSettings(merged: ClipSettings): ClipSettings {
   }
   if (!MODOS.includes(merged.modo as (typeof MODOS)[number])) {
     throw new InvalidClipSettings(`El modo ${merged.modo} no existe.`)
+  }
+  if (!SELECTORES.includes(merged.selector as (typeof SELECTORES)[number])) {
+    throw new InvalidClipSettings(`El selector ${merged.selector} no existe.`)
   }
 
   /*
@@ -346,6 +366,7 @@ export const COLUMNAS: Record<keyof ClipSettings, string> = {
   concurrencia: 'concurrencia',
   proveedor: 'proveedor',
   modo: 'modo',
+  selector: 'selector',
   tituloActivo: 'titulo_activo',
   tituloTexto: 'titulo_texto',
   tituloArriba: 'titulo_arriba',
@@ -420,6 +441,10 @@ export function ajustesDeFila(fila: Record<string, unknown>): ClipSettings {
   }
   const modo = fila[COLUMNAS.modo]
   if (typeof modo === 'string' && MODOS.includes(modo as (typeof MODOS)[number])) out.modo = modo
+  const sel = fila[COLUMNAS.selector]
+  if (typeof sel === 'string' && SELECTORES.includes(sel as (typeof SELECTORES)[number])) {
+    out.selector = sel
+  }
 
   /*
    * El rotulo, con las mismas cautelas que todo lo de arriba.

@@ -162,7 +162,7 @@ async function main(): Promise<void> {
   // una fraccion de centimo y es la unica forma de saber que el pipeline puede
   // correr antes de lanzarlo.
   const apiKey = optionalEnv('ANTHROPIC_API_KEY')
-  const model = optionalEnv('SELECT_MODEL') ?? 'claude-opus-4-8'
+  const model = optionalEnv('SELECT_MODEL') ?? 'claude-opus-5-5'
 
   if (apiKey === undefined) {
     record('ANTHROPIC_API_KEY', false, 'no configurada (necesaria desde la Fase 2)', false)

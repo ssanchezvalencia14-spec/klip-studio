@@ -34,7 +34,7 @@ export class AnthropicSelectionProvider implements SelectionProvider {
   constructor(
     private readonly client: Anthropic,
     readonly model: string,
-    private readonly effort: 'low' | 'medium' | 'high' | 'max',
+    private readonly effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max',
   ) {}
 
   async select(systemPrompt: string, userPrompt: string): Promise<SelectionResult> {

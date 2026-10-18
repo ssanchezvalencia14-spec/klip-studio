@@ -25,13 +25,26 @@ const log = createLogger('select')
  * de renderizar y publicar 60 clips diarios. Se puede bajar con SELECT_MODEL en
  * .env, pero conviene medir la calidad antes de hacerlo.
  */
-const DEFAULT_MODEL = 'claude-opus-4-8'
+const DEFAULT_MODEL = 'claude-opus-5-5'
 
-/** Precios por millon de tokens. Solo para estimar; verifica antes de presupuestar. */
+/**
+ * Precios por millon de tokens. Solo para estimar; verifica antes de presupuestar.
+ *
+ * VERIFICADOS el 2026-10-18 contra la tabla de modelos vigente. Dos arreglos de
+ * esa revision: se añade claude-opus-5-5, y claude-sonnet-5 estaba a 3/15, que
+ * son los precios de Sonnet 4.6 -- los suyos son 2/10, asi que el panel
+ * sobrestimaba su coste un cincuenta por ciento.
+ *
+ * Un modelo que no este aqui no rompe nada: estimatedUsd sale null y el panel
+ * enseña el coste en blanco en vez de una cifra inventada.
+ */
 const PRICING: Record<string, { input: number; output: number }> = {
+  'claude-opus-5-5': { input: 4, output: 20 },
+  'claude-opus-5': { input: 5, output: 25 },
   'claude-opus-4-8': { input: 5, output: 25 },
   'claude-opus-4-7': { input: 5, output: 25 },
-  'claude-sonnet-5': { input: 3, output: 15 },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+  'claude-sonnet-5': { input: 2, output: 10 },
   'claude-haiku-4-5': { input: 1, output: 5 },
 }
 
@@ -101,7 +114,13 @@ export function createSelectionProvider(): SelectionProvider {
 
   const apiKey = requireEnv('ANTHROPIC_API_KEY')
   const model = optionalEnv('SELECT_MODEL') ?? DEFAULT_MODEL
-  const effort = (optionalEnv('SELECT_EFFORT') ?? 'high') as 'low' | 'medium' | 'high' | 'max'
+  /*
+   * xhigh entra en la lista: Opus 5.5 lo admite y queda entre high y max.
+   * Sin el, poner SELECT_EFFORT=xhigh en el .env lo aceptaba TypeScript por el
+   * casting y lo rechazaba la API a mitad del VOD.
+   */
+  const effort = (optionalEnv('SELECT_EFFORT') ?? 'high') as
+    | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   return new AnthropicSelectionProvider(new Anthropic({ apiKey }), model, effort)
 }
 

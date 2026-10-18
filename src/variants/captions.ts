@@ -140,6 +140,6 @@ export function createCaptionVarier(): CaptionVarier {
   const apiKey = optionalEnv('ANTHROPIC_API_KEY')
   if (apiKey === undefined) return new HashtagOnlyVarier()
 
-  const model = optionalEnv('SELECT_MODEL') ?? 'claude-opus-4-8'
+  const model = optionalEnv('SELECT_MODEL') ?? 'claude-opus-5-5'
   return new ModelCaptionVarier(new Anthropic({ apiKey }), model)
 }

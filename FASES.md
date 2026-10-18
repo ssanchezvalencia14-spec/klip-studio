@@ -146,7 +146,7 @@ Implementa:
    cortado a mitad de frase.
 
 2. src/select/select.ts
-   Usa el SDK de Anthropic (@anthropic-ai/sdk) con claude-opus-4-8.
+   Usa el SDK de Anthropic (@anthropic-ai/sdk) con claude-opus-5-5.
    Fuerza salida estructurada con `client.messages.parse()` y `output_config.format`,
    no parseo de texto libre. Esquema:
    {

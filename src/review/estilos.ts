@@ -2517,4 +2517,20 @@ export const CSS = `  :root {
     .resumen-nombre { font-size: 12px; line-height: 1.3; }
     .resumen-nota { font-size: 11px; }
   }
+
+  /* Vista previa de Estilo: fotograma limpio y zona segura (Fase 5). */
+  .pv-marco { background: var(--raised); border: 1px solid var(--line); }
+  .pv-foto { object-fit: cover; }
+  .pv-sinvideo { color: var(--dim); }
+  /* El 20 % de abajo del lienzo (384 de 1920), que tapa la interfaz de TikTok. */
+  .pv-zona {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 20%; pointer-events: none;
+    border-top: 1px dashed var(--aviso-texto);
+    background: repeating-linear-gradient(135deg, var(--aviso-fondo) 0 6px, transparent 6px 12px);
+    opacity: .85;
+  }
+  .pv-zona span {
+    position: absolute; right: 6px; top: 4px; font-size: 10px; font-weight: 600;
+    color: var(--aviso-texto); letter-spacing: .02em;
+  }
 `

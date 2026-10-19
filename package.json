@@ -55,7 +55,8 @@
     "verify:reparto": "tsx scripts/verify-reparto.ts",
     "verify:uploadpost": "tsx scripts/verify-uploadpost.ts",
     "verify:texto": "tsx scripts/verify-texto.ts",
-    "vaciar": "tsx scripts/vaciar.ts"
+    "vaciar": "tsx scripts/vaciar.ts",
+    "instalar-rostros": "npm install --prefix vendor/rostros --no-save --no-package-lock onnxruntime-node@1.30.0 && tsx scripts/modelos.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

@@ -81,6 +81,25 @@ Hay que rotar igual:
   movimiento) evita que salte de una a otra.
 - **El panel remoto no sube MP4** (devuelve 501). Ya pasaba antes de la Fase 6.
 
+## Fase 7: lo que queda por probar o se hizo distinto
+
+- **El reparto ignoraba a los clientes.** No era una contradicción con el plan,
+  pero sí con el modelo de datos: un video de una campaña se repartía por todas
+  las cuentas. Corregido: va a las cuentas de su cliente (sin campaña, a las sin
+  cliente). Además el planificador leía el horario de `state/settings.json` y
+  no de la base: los cambios en Horarios no llegaban al reparto. Corregido.
+- **Shorts y Reels sin probar contra la API real.** Los campos (`platform[]`,
+  `youtube_title`, `media_type=REELS`) salen de la documentación de
+  upload-post; no hay clave en esta PC. Probar con una cuenta que tenga YouTube
+  conectado antes de marcarlo en muchas.
+- **Alertas sin probar con Telegram de verdad.** `verify:fase7` comprueba la
+  petición que se haría; falta poner el token en el `.env` del panel y pulsar
+  "Enviar una prueba" en Ajustes › Sistema.
+- **Variación de textos con la suscripción** gasta una llamada a `claude -p` por
+  clip al repartir. Si la IA está en el límite cae a la variación sin IA.
+- **Métricas**: las cifras dependen de lo que devuelva upload-post (o del
+  permiso `video.list` con la API directa), como antes de esta fase.
+
 ## Contradicciones entre el plan y el proyecto
 
 La regla 8 del plan pide avisar en lugar de improvisar. Estas son las que

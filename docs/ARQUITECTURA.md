@@ -101,7 +101,7 @@ Sin llave solo atienden `/auth/tiktok/callback` y las dos páginas legales
 
 `owners`, `sources`, `accounts`, `clips`, `queue`, `posts`, `metrics`, `runs`,
 `settings`, `jobs`, `plantillas`, `tiktok_tokens`, `tiktok_pendientes`,
-`clientes`, `campanas`, `trabajadores`. Todo lleva `owner_id`; hoy hay un único
+`clientes`, `campanas`, `trabajadores`, `alertas` (Fase 7). Todo lleva `owner_id`; hoy hay un único
 dueño fijo (`OWNER_ID` en `src/lib/owner.ts`).
 
 ---
@@ -129,6 +129,7 @@ raíz. **Una variable que ya existe en el entorno del proceso gana sobre el
 | `OWNER_EMAIL`, `LEGAL_TITULAR`, `LEGAL_PAIS`, `LEGAL_EMAIL` | Páginas legales | Panel | Parcial (falta `OWNER_EMAIL`) |
 | `HOSTINGER_DOMINIO`, `HOSTINGER_USUARIO`, `HOSTINGER_API_TOKEN` | Desplegar | PC | Parcial (falta el token) |
 | `NVENC_PRESET`, `NVENC_CQ`, `BLUR_SIGMA`, `SUBTITLE_SIZE`, `SUBTITLE_FONT` | Ajustes finos del render | PC | **No** |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `RESEND_API_KEY`, `ALERTAS_CORREO_PARA`, `ALERTAS_CORREO_DE` | Alertas (Fase 7) | **Panel** | Sí, vacías |
 
 ---
 
@@ -146,6 +147,7 @@ raíz. **Una variable que ya existe en el entorno del proceso gana sobre el
 | API de TikTok (opcional) | Publicación directa | PC y panel (OAuth) | Sin auditoría todo sale en privado |
 | Supabase | Postgres y Storage | Nube | Plan gratuito: 1 GB de Storage y 60 conexiones |
 | Hostinger | Hospeda el panel | Nube | Hostinger compila con `npm run build` y arranca con `npm start` |
+| Telegram / Resend (opcional) | Alertas | Panel | Las manda el panel cada minuto (`src/alertas/vigia.ts`): si se cae el procesador, alguien de fuera tiene que avisar |
 
 **Python no se usa en ninguna parte.** Es una decisión del proyecto
 (`CONTEXT.md` §2). Las fases 6 (MediaPipe, Demucs, librosa) chocan con ella.

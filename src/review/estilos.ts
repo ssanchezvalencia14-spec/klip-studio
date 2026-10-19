@@ -2533,4 +2533,37 @@ export const CSS = `  :root {
     position: absolute; right: 6px; top: 4px; font-size: 10px; font-weight: 600;
     color: var(--aviso-texto); letter-spacing: .02em;
   }
+
+  /* =====================================================================
+   * Fase 6: Revisar con desglose, titulo y editor ligero.
+   * ===================================================================== */
+  .gancho-cita { margin: -6px 0 var(--s3); color: var(--faint); font-size: var(--t-meta); font-style: italic; }
+  .desglose { list-style: none; margin: var(--s3) 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .desglose li { display: grid; grid-template-columns: 80px 1fr 30px; align-items: center; gap: var(--s2); font-size: var(--t-meta); color: var(--dim); }
+  .desglose b { text-align: right; color: var(--text); font-weight: 500; }
+  .desglose-barra { display: block; height: 5px; border-radius: var(--r-pildora); background: var(--raised); overflow: hidden; }
+  .desglose-barra i { display: block; height: 100%; border-radius: inherit; background: var(--azul-texto); }
+
+  .linea-tiempo { position: relative; margin: var(--s3) 0 var(--s2); padding-top: 4px; }
+  .linea-pista { position: relative; height: 8px; border-radius: var(--r-pildora); background: var(--raised); }
+  .linea-sel { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: var(--azul); }
+  .linea-tiempo input[type="range"] {
+    position: absolute; left: 0; right: 0; top: -2px; width: 100%; margin: 0; height: 20px;
+    background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; min-height: 0;
+  }
+  .linea-tiempo input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; pointer-events: auto; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--text); border: 3px solid var(--azul); cursor: ew-resize;
+  }
+  .linea-tiempo input[type="range"]::-moz-range-thumb {
+    pointer-events: auto; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--text); border: 3px solid var(--azul); cursor: ew-resize;
+  }
+  .linea-marcas { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--faint); }
+
+  .lineas-sub { list-style: none; margin: var(--s3) 0; padding: 0; display: flex; flex-direction: column; gap: 6px;
+    max-height: 320px; overflow-y: auto; }
+  .lineas-sub li { display: grid; grid-template-columns: 52px 1fr; gap: var(--s2); align-items: center; }
+  .lineas-sub .dato { font-size: 11.5px; color: var(--faint); }
+  .lineas-sub input { min-height: 38px; }
 `

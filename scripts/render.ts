@@ -36,6 +36,36 @@ function parseManualClip(spec: string): RenderClip {
   return { start, end }
 }
 
+/*
+ * Lo editado en Revisar (Fase 6): el titulo y los subtitulos de cada clip.
+ *
+ * Vive en la base porque se edita desde el panel. El render corre en el PC,
+ * que tiene acceso a la base; si no lo tuviera (render a mano sin
+ * DATABASE_URL), se arma con lo de clips.json, como antes.
+ */
+async function ediciones(sourceId: string): Promise<Map<string, { titulo: string; subtitulos: { start: number; end: number; text: string }[] | null }>> {
+  const salida = new Map<string, { titulo: string; subtitulos: { start: number; end: number; text: string }[] | null }>()
+  const url = process.env.DATABASE_URL
+  if (url === undefined || url === '') return salida
+  try {
+    const { connect } = await import('../src/store/db.js')
+    const { createStore } = await import('../src/store/pg.js')
+    const { OWNER_ID } = await import('../src/lib/owner.js')
+    const db = await connect(url)
+    try {
+      for (const c of await createStore(db, OWNER_ID).clips.all()) {
+        if (c.sourceId !== sourceId) continue
+        salida.set(c.clipId, { titulo: c.titulo ?? '', subtitulos: c.subtitulos ?? null })
+      }
+    } finally {
+      await db.close()
+    }
+  } catch (error) {
+    console.warn(`No se pudieron leer las ediciones del panel: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return salida
+}
+
 async function main(): Promise<void> {
   loadEnv()
 
@@ -54,6 +84,8 @@ async function main(): Promise<void> {
       'sub-font': { type: 'string' },
       'sub-size': { type: 'string' },
       'sub-margin': { type: 'string' },
+      // 'rostro' (lo normal) o 'clasico', el de fondo borroso.
+      encuadre: { type: 'string', default: 'rostro' },
       // Rotulos cortos al ritmo del habla, con entrada animada. Sin esto, un
       // rotulo por segmento, que es lo de siempre.
       'sub-words': { type: 'string' },
@@ -165,10 +197,15 @@ async function main(): Promise<void> {
     const manual = values.clip !== undefined && values.clip.length > 0
       ? parseManualClip(values.clip[0] ?? '')
       : null
+    const editado = (await ediciones(sourceId)).get(values.solo)
     const uno: RenderClip = {
       start: manual?.start ?? previo.start,
       end: manual?.end ?? previo.end,
       caption: previo.caption,
+      titulo: editado?.titulo || previo.titulo || '',
+      // Con el corte cambiado, los subtitulos editados ya no cuadran: mandan
+      // los de la transcripcion en el corte nuevo.
+      subtitulos: manual === null ? (editado?.subtitulos ?? null) : null,
     }
 
     /*
@@ -189,6 +226,7 @@ async function main(): Promise<void> {
       const result = await renderClip(transcript, sourceVideo, uno, indice, {
         subtitles: !values['no-subs'],
         sub,
+        encuadre: values.encuadre === 'clasico' ? 'clasico' : 'rostro',
         ...(values['titulo-texto'] === undefined ? {} : { rotulo: values['titulo-texto'] }),
       })
       run.finish({
@@ -218,7 +256,17 @@ async function main(): Promise<void> {
       process.exit(1)
     }
     const file = readJson<ClipsFile>(clipsPath)
-    clips = file.clips.map((c) => ({ start: c.start, end: c.end, caption: c.caption }))
+    const ed = await ediciones(sourceId)
+    clips = file.clips.map((c, i) => {
+      const e = ed.get(`clip-${String(i + 1).padStart(2, '0')}`)
+      return {
+        start: c.start,
+        end: c.end,
+        caption: c.caption,
+        titulo: e?.titulo || c.titulo || '',
+        subtitulos: e?.subtitulos ?? null,
+      }
+    })
     console.log(`Clips desde clips.json: ${clips.length}`)
   }
 
@@ -236,6 +284,7 @@ async function main(): Promise<void> {
       const result = await renderClip(transcript, sourceVideo, clip, i + 1, {
         subtitles: !values['no-subs'],
         sub,
+        encuadre: values.encuadre === 'clasico' ? 'clasico' : 'rostro',
         ...(values['titulo-texto'] === undefined ? {} : { rotulo: values['titulo-texto'] }),
       })
       rendered.push(result.path)

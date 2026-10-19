@@ -1293,6 +1293,74 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     return
   }
 
+  /*
+   * Editor ligero de un clip (Fase 6): titulo, subtitulos y, si se pide,
+   * volver a armar solo ese clip. El corte (inicio y fin) va por su camino de
+   * siempre: la tarea render con --solo y --clip.
+   */
+  const edicion = /^\/api\/clips\/([^/]+)\/([^/]+)\/editar$/.exec(path)
+  if (edicion !== null && req.method === 'POST') {
+    const sourceId = decodeURIComponent(edicion[1] ?? '')
+    const clipId = decodeURIComponent(edicion[2] ?? '')
+    const body = (await readBody(req)) as { titulo?: unknown; subtitulos?: unknown; rearmar?: unknown }
+
+    let titulo: string | undefined
+    if (body.titulo !== undefined) {
+      titulo = String(body.titulo).replace(/\s+/g, ' ').trim()
+      if (titulo.split(' ').filter(Boolean).length > 8) {
+        sendJson(res, 400, { error: 'El título admite como mucho 8 palabras.' })
+        return
+      }
+      if (titulo.length > 90) {
+        sendJson(res, 400, { error: 'El título es demasiado largo.' })
+        return
+      }
+    }
+
+    let subtitulos: { start: number; end: number; text: string }[] | null | undefined
+    if (body.subtitulos === null) subtitulos = null
+    else if (Array.isArray(body.subtitulos)) {
+      subtitulos = []
+      for (const x of body.subtitulos.slice(0, 400)) {
+        const l = x as { start?: unknown; end?: unknown; text?: unknown }
+        const start = Number(l.start)
+        const end = Number(l.end)
+        const text = String(l.text ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200)
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          sendJson(res, 400, { error: 'Hay una línea de subtítulo con tiempos que no cuadran.' })
+          return
+        }
+        if (text !== '') subtitulos.push({ start, end, text })
+      }
+    }
+
+    const editado = await store.clips.editar(sourceId, clipId, {
+      ...(titulo === undefined ? {} : { titulo }),
+      ...(subtitulos === undefined ? {} : { subtitulos }),
+    })
+    if (editado === undefined) {
+      sendJson(res, 404, { error: 'Clip no encontrado' })
+      return
+    }
+
+    let encolada: unknown = null
+    if (body.rearmar === true) {
+      const built = buildJob(
+        'render',
+        { sourceId, clipId },
+        new Set([sourceId]),
+        await loadClipSettings(db, ownerId),
+      )
+      if (!(await cola.hayActiva(['render'], sourceId))) {
+        encolada = await cola.encolar(built.kind, built.args, built.label)
+        avisarCambio('trabajos')
+      }
+    }
+    avisarCambio('clips')
+    sendJson(res, 200, { clip: toView(editado), encolada })
+    return
+  }
+
   const decision = /^\/api\/clips\/([^/]+)\/([^/]+)$/.exec(path)
   if (decision !== null && req.method === 'POST') {
     const sourceId = decodeURIComponent(decision[1] ?? '')

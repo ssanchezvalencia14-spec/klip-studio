@@ -1696,6 +1696,127 @@ function itemCola(c, i) {
   '</div>';
 }
 
+/** Gancho, cierre y retencion, cuando la IA los dio. */
+function desglosePuntaje(c) {
+  if (!c.puntajes) return '';
+  const filas = [['Gancho', c.puntajes.gancho], ['Cierre', c.puntajes.cierre], ['Retención', c.puntajes.retencion]];
+  return '<ul class="desglose">' + filas.map(([n, v]) =>
+    '<li><span>' + n + '</span><span class="desglose-barra"><i style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></span>' +
+    '<b class="dato">' + v + '</b></li>').join('') + '</ul>';
+}
+
+/*
+ * La linea de tiempo del corte: 30 s antes y despues del clip, con dos
+ * deslizadores que mueven el inicio y el fin. Los campos numericos y los
+ * botones "Empieza aqui" siguen debajo, y los tres caminos se sincronizan.
+ */
+function lineaCorte(c) {
+  const min = Math.max(0, Math.floor(c.start - 30));
+  const max = Math.ceil(c.end + 30);
+  const pct = (v) => ((v - min) / (max - min) * 100).toFixed(2);
+  return '<div class="linea-tiempo" data-min="' + min + '" data-max="' + max + '">' +
+    '<div class="linea-pista"><span class="linea-sel" style="left:' + pct(c.start) + '%;right:' + (100 - Number(pct(c.end))).toFixed(2) + '%"></span></div>' +
+    '<input type="range" class="rango-ini" min="' + min + '" max="' + max + '" step="0.1" value="' + c.start + '" aria-label="Inicio del clip">' +
+    '<input type="range" class="rango-fin" min="' + min + '" max="' + max + '" step="0.1" value="' + c.end + '" aria-label="Fin del clip">' +
+    '<div class="linea-marcas dato"><span>' + fmt(min) + '</span><span>' + fmt(max) + '</span></div>' +
+  '</div>';
+}
+
+/*
+ * Editar el texto de los subtitulos de ESTE clip.
+ *
+ * Parte de lo editado si lo hay, o de la transcripcion. Guardar vuelve a
+ * armar solo este clip; "originales" descarta lo editado.
+ */
+function editorSubtitulos(c) {
+  const lineas = (c.subtitulos && c.subtitulos.length ? c.subtitulos : (c.segmentos || []));
+  if (lineas.length === 0) return '';
+  return '<details class="corte editor-subs">' +
+    '<summary>Editar subtítulos' + (c.subtitulos ? ' <span class="estado-chip info">editados</span>' : '') + '</summary>' +
+    '<ol class="lineas-sub">' + lineas.map((l, i) =>
+      '<li data-start="' + l.start + '" data-end="' + l.end + '">' +
+        '<span class="dato">' + fmt(l.start) + '</span>' +
+        '<input class="linea-sub" value="' + esc(l.text) + '" aria-label="Subtítulo ' + (i + 1) + '">' +
+      '</li>').join('') + '</ol>' +
+    '<div class="chips">' +
+      (c.subtitulos ? '<button class="chip" data-subs-originales>Volver a los originales</button>' : '') +
+      '<button class="chip primario" data-subs-guardar>Guardar y volver a armar</button>' +
+    '</div>' +
+  '</details>';
+}
+
+async function editarClip(card, cuerpo, aviso) {
+  try {
+    const r = await api('/api/clips/' + encodeURIComponent(card.dataset.source) + '/' + encodeURIComponent(card.dataset.clip) + '/editar', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cuerpo),
+    });
+    avisar(aviso + (cuerpo.rearmar ? (r.encolada ? ' Se vuelve a armar el clip.' : ' Ya se estaba armando; espera a que termine.') : ''));
+    refrescar();
+  } catch (err) {
+    avisar(err.message);
+  }
+}
+
+document.addEventListener('click', e => {
+  const card = e.target.closest && e.target.closest('.detalle-clip');
+  if (!card) return;
+  if (e.target.closest('[data-guardar-titulo]')) {
+    const titulo = card.querySelector('.titulo-clip').value.trim();
+    if (titulo.split(/\\s+/).filter(Boolean).length > 8) { avisar('El título admite como mucho 8 palabras.'); return; }
+    editarClip(card, { titulo }, 'Título guardado.');
+    return;
+  }
+  if (e.target.closest('[data-subs-guardar]')) {
+    const subtitulos = [...card.querySelectorAll('.lineas-sub li')].map(li => ({
+      start: Number(li.dataset.start), end: Number(li.dataset.end), text: li.querySelector('.linea-sub').value,
+    }));
+    editarClip(card, { subtitulos, rearmar: true }, 'Subtítulos guardados.');
+    return;
+  }
+  if (e.target.closest('[data-subs-originales]')) {
+    editarClip(card, { subtitulos: null, rearmar: true }, 'Se vuelven a usar los subtítulos originales.');
+  }
+});
+
+// El titulo avisa al pasar de 8 palabras, mientras se escribe.
+document.addEventListener('input', e => {
+  if (e.target.classList && e.target.classList.contains('titulo-clip')) {
+    const n = e.target.value.trim().split(/\\s+/).filter(Boolean).length;
+    const aviso = e.target.closest('.field').querySelector('.titulo-aviso');
+    if (aviso) aviso.textContent = n > 8 ? 'Sobran ' + (n - 8) + (n - 8 === 1 ? ' palabra.' : ' palabras.') : '';
+    return;
+  }
+  // Los deslizadores mueven los campos del corte, y al reves.
+  const r = e.target.closest && e.target.closest('.rango-ini, .rango-fin');
+  const card = e.target.closest && e.target.closest('.detalle-clip');
+  if (!card) return;
+  const ini = card.querySelector('.corte-ini');
+  const fin = card.querySelector('.corte-fin');
+  if (r) {
+    if (r.classList.contains('rango-ini')) ini.value = r.value; else fin.value = r.value;
+  } else if (e.target === ini || e.target === fin) {
+    const ri = card.querySelector('.rango-ini');
+    const rf = card.querySelector('.rango-fin');
+    if (ri) ri.value = ini.value;
+    if (rf) rf.value = fin.value;
+  } else {
+    return;
+  }
+  const linea = card.querySelector('.linea-tiempo');
+  if (linea) {
+    const min = Number(linea.dataset.min);
+    const max = Number(linea.dataset.max);
+    const sel = linea.querySelector('.linea-sel');
+    const a = Math.max(min, Math.min(Number(ini.value), max));
+    const b = Math.max(min, Math.min(Number(fin.value), max));
+    sel.style.left = ((a - min) / (max - min) * 100) + '%';
+    sel.style.right = (100 - (b - min) / (max - min) * 100) + '%';
+  }
+  pintarCorte(card);
+});
+
 function detalleClip(c) {
   const over = c.caption.length > 150;
   const pendiente = state.filter === 'pending';
@@ -1703,7 +1824,8 @@ function detalleClip(c) {
     ' data-source="' + esc(c.sourceId) + '" data-clip="' + esc(c.clipId) + '"' +
     ' data-start="' + c.start + '" data-end="' + c.end + '"><div class="body">' +
     '<p class="ante">Clip <span class="dato">' + esc(c.clipId) + '</span></p>' +
-    '<h2 class="detalle-titulo">' + esc(c.hook) + '</h2>' +
+    '<h2 class="detalle-titulo">' + esc(c.titulo || c.hook) + '</h2>' +
+    (c.titulo ? '<p class="gancho-cita">«' + esc(c.hook) + '»</p>' : '') +
     '<div class="rango">' +
       '<span>' + ico('reloj') + '<span class="dato">' + fmt(c.start) + ' – ' + fmt(c.end) + '</span></span>' +
       '<span class="dato">' + c.durationSec + ' s</span>' +
@@ -1712,8 +1834,16 @@ function detalleClip(c) {
     '<div class="puntaje-grande">' +
       '<div class="puntaje-cab"><span>Puntaje</span><b class="dato">' + c.score + '<small>/100</small></b></div>' +
       '<span class="puntaje-barra"><i style="width:' + Math.max(0, Math.min(100, c.score)) + '%"></i></span>' +
+      desglosePuntaje(c) +
     '</div>' +
     (c.reason ? '<p class="motivo"><b>Por qué:</b> ' + esc(c.reason) + '</p>' : '') +
+    '<div class="field">' +
+      '<label for="titulo-' + esc(c.clipId) + '">Título (máximo 8 palabras)</label>' +
+      '<div class="fila-input"><input id="titulo-' + esc(c.clipId) + '" class="titulo-clip" maxlength="90" value="' + esc(c.titulo || '') + '"' +
+        ' placeholder="Un título corto, distinto de la primera frase">' +
+        '<button class="chip" data-guardar-titulo>Guardar</button></div>' +
+      '<p class="reason titulo-aviso" style="margin:6px 0 0"></p>' +
+    '</div>' +
     '<div class="field">' +
       '<label for="caption-' + esc(c.clipId) + '">Descripción del clip</label>' +
       '<textarea id="caption-' + esc(c.clipId) + '" rows="3" class="caption">' + esc(c.caption) + '</textarea>' +
@@ -1723,10 +1853,9 @@ function detalleClip(c) {
       '<label for="tags-' + esc(c.clipId) + '">Etiquetas</label>' +
       '<input id="tags-' + esc(c.clipId) + '" class="tags" value="' + esc(c.hashtags.join(', ')) + '">' +
     '</div>' +
-    (state.overview?.remoto ? '' :
     '<details class="corte">' +
       '<summary>Ajustar inicio y fin</summary>' +
-      '<div class="linea-corte" aria-hidden="true"><span style="left:0;right:0"></span></div>' +
+      lineaCorte(c) +
       '<div class="corte-fila"><label>Empieza en' +
         '<input type="number" class="corte-ini" step="0.1" min="0" value="' + c.start + '"></label>' +
         '<button class="chip" data-marcar="ini">Empieza aquí</button></div>' +
@@ -1738,7 +1867,8 @@ function detalleClip(c) {
         '<button class="chip" data-corte-reset>Dejarlo como estaba</button>' +
         '<button class="chip primario" data-rehacer disabled>Volver a armar este clip</button>' +
       '</div>' +
-    '</details>') +
+    '</details>' +
+    editorSubtitulos(c) +
     '<div class="decidir">' +
       (pendiente
         ? '<button class="act reject" data-do="rejected">' + ico('cerrar') + 'Descartar <kbd>R</kbd></button>' +
@@ -2587,6 +2717,18 @@ const CORTES = [
     ],
   },
   {
+    icono: '&#9634;', titulo: 'Cómo se encuadra',
+    pie: 'El video horizontal se pasa a vertical. Siguiendo la cara, el encuadre acompaña a quien habla; ' +
+         'si no se encuentra ninguna cara, ese clip sale en clásico.',
+    campos: [
+      {
+        key: 'encuadre', texto: 'Encuadre',
+        lista: [['rostro', 'Siguiendo la cara'], ['clasico', 'Clásico (fondo borroso)']],
+        texto_valor: true,
+      },
+    ],
+  },
+  {
     icono: '&#9647;', titulo: 'Cómo salen los subtítulos',
     pie: 'En TikTok la mayoria mira sin sonido, así que quitarlos casi siempre cuesta visitas. ' +
          'La altura los deja por encima de la franja donde TikTok pone el texto y los botones.',
@@ -3125,6 +3267,7 @@ const BASE_CORTES = {
   subPalabras: 3, subAnimacion: true,
   tituloActivo: false, tituloTexto: '{titulo}', tituloArriba: 240, tituloTam: 64,
   tituloColor: '#FFFFFF', tituloColorBorde: '#000000', tituloBorde: 6,
+  encuadre: 'rostro',
   textoPlantilla: '{titulo} {hashtags}', hashtagsFijos: '',
   privacidad: 'PUBLIC_TO_EVERYONE', maxPorMinuto: 5, maxPorDia: 13,
   proveedor: 'upload-post', modo: 'direct',

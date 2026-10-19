@@ -5,6 +5,8 @@ import { createLogger } from '../lib/logger.js'
 import { run } from '../lib/proc.js'
 import { limpiarRutas } from '../lib/limpiar.js'
 import type { Db } from '../store/db.js'
+import { respaldar } from '../store/respaldo.js'
+import { crearNube } from '../store/nube.js'
 
 const log = createLogger('sistema')
 
@@ -187,9 +189,30 @@ export function createSistema(db: Db, ownerId: string) {
       return { videos, clips, mb }
     },
 
+    /**
+     * Respaldo diario de la base (Fase 8). Copia local y, si hay Supabase
+     * Storage, otra en el cubo privado.
+     */
+    async respaldoDiario(): Promise<void> {
+      const r = await respaldar(db)
+      let enNube = false
+      const nube = crearNube()
+      if (nube !== null) {
+        try {
+          await nube.subir(`respaldos/${r.nombre}`, r.fichero, 'application/gzip')
+          enNube = true
+        } catch (e) {
+          log.warn(`No se pudo subir el respaldo a la nube: ${limpiarRutas(e instanceof Error ? e.message : String(e))}`)
+        }
+      }
+      await guardar('respaldo', { nombre: r.nombre, tablas: r.tablas, filas: r.filas, kb: r.kb, nube: enNube })
+      log.info(`Respaldo ${r.nombre}: ${r.filas} filas, ${r.kb} KB${enNube ? ', copia en la nube' : ''}.`)
+    },
+
     /** Lo que el trabajador hace de vez en cuando, cada cosa a su ritmo. */
     async mantenimiento(): Promise<void> {
       try {
+        if (await this.debeHacerse('respaldo', 86_400_000)) await this.respaldoDiario()
         if (await this.debeHacerse('ytdlp', SEMANA_MS)) await this.comprobarYtdlp()
         if (await this.debeHacerse('disco', 30 * 60_000)) await this.comprobarDisco()
         if (await this.debeHacerse('retencion', 86_400_000)) {

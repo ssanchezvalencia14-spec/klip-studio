@@ -41,3 +41,6 @@ tmp-mon.ts
 
 # onnxruntime-node para el reencuadre: se instala aparte (npm run instalar-rostros).
 vendor/
+
+# Respaldos de la base (Fase 8): datos sensibles, nunca en git.
+respaldos/

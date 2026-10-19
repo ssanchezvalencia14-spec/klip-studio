@@ -58,6 +58,8 @@
     "verify:uploadpost": "tsx scripts/verify-uploadpost.ts",
     "verify:texto": "tsx scripts/verify-texto.ts",
     "vaciar": "tsx scripts/vaciar.ts",
+    "respaldo": "tsx scripts/respaldo.ts",
+    "restaurar": "tsx scripts/respaldo.ts --restaurar",
     "instalar-rostros": "npm install --prefix vendor/rostros --no-save --no-package-lock onnxruntime-node@1.30.0 && tsx scripts/modelos.ts"
   },
   "devDependencies": {

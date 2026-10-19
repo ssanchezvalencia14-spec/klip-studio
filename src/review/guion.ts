@@ -1352,6 +1352,7 @@ function pintarProcesador(d) {
   const ytdlp = (d.estado.ytdlp && d.estado.ytdlp.valor) || null;
   const disco = (d.estado.disco && d.estado.disco.valor) || null;
   const ret = (d.estado.retencion && d.estado.retencion.valor) || null;
+  const resp = d.estado.respaldo || null;
   const usado = disco ? Math.round(disco.usado * 100) : null;
   const nombres = { '': 'Ninguno', chrome: 'Chrome', edge: 'Edge', firefox: 'Firefox', brave: 'Brave', opera: 'Opera', vivaldi: 'Vivaldi', chromium: 'Chromium' };
 
@@ -1369,6 +1370,13 @@ function pintarProcesador(d) {
             (ytdlp.actualizacion ? '<br><span class="reason">' + esc(ytdlp.actualizacion) + '</span>' : '')
           : 'se comprueba una vez por semana') + '</span>' +
         '<span class="vivo-punto' + (!ytdlp || ytdlp.ok ? '' : ' espera') + '"></span></li>' +
+      // Fase 8: el respaldo diario de la base.
+      '<li>' + ico('hecho') + '<span class="estado-nombre">Respaldo</span>' +
+        '<span class="estado-texto">' + (resp
+          ? hace(resp.actualizadoEn) + ' · ' + plural(resp.valor.filas, 'fila') + ' · ' + resp.valor.kb + ' KB' +
+            (resp.valor.nube ? ' · con copia en la nube' : ' · solo en el procesador')
+          : 'todavía ninguno: lo hace el procesador una vez al día') + '</span>' +
+        '<span class="vivo-punto' + (resp && Date.now() - new Date(resp.actualizadoEn).getTime() < 2 * 86400000 ? '' : ' espera') + '"></span></li>' +
       '<li>' + ico('actividad') + '<span class="estado-nombre">Disco</span>' +
         '<span class="estado-texto">' + (disco
           ? usado + ' % usado · ' + disco.libreGb + ' GB libres'

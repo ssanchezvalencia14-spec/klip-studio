@@ -725,7 +725,7 @@ check(
     'La API sigue recibiendo JSON en una ruta desconocida',
     comoApi.status === 404 &&
       typeof comoApi.body === 'object' &&
-      (comoApi.body as { error?: string }).error === 'Ruta desconocida',
+      (comoApi.body as { error?: string }).error === 'Esa dirección no existe en el panel.',
     `${comoApi.status} ${JSON.stringify(comoApi.body)}`,
   )
 

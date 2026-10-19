@@ -81,6 +81,26 @@ Hay que rotar igual:
   movimiento) evita que salte de una a otra.
 - **El panel remoto no sube MP4** (devuelve 501). Ya pasaba antes de la Fase 6.
 
+## Fase 8: seguridad, pruebas y cierre
+
+- **CSP con huella para el script, pero estilos con 'unsafe-inline'.** El panel
+  usa atributos style="" en muchas pantallas y una politica con huellas no los
+  admite. Un estilo inyectado no ejecuta codigo; un script si, y ese esta
+  cerrado. Quitarlo exige pasar esos estilos a clases.
+- **El limite de peticiones vive en memoria** del proceso del panel: con un solo
+  proceso (Hostinger) basta; con varios habria que llevarlo a la base.
+- **Tras el proxy, el limite se fia de x-forwarded-for**, que se puede falsear.
+  Es una red de seguridad; el login ya se protege por intentos.
+- **Respaldos sin pg_dump**: JSON comprimido por tabla. Restaurar es aditivo (no
+  pisa ni borra). Para volver atras en una base con datos, vaciarla primero.
+- **La prueba de extremo a extremo sustituye** transcribir (ffmpeg), Claude (un
+  CLI falso) y armar clips: el resto del flujo es el real. `verify:jobs`,
+  `verify:db`, `verify:proyectos` y `verify:produccion` necesitan ffmpeg o la
+  base real y `npm test` los marca OMITIDA aqui.
+- **Arreglado por el camino:** las tareas viajaban al navegador con la ruta
+  completa del MP4 subido (C:\Users\...), y el separador de llaveClip metia un
+  caracter NUL en el script del panel.
+
 ## Fase 7: lo que queda por probar o se hizo distinto
 
 - **El reparto ignoraba a los clientes.** No era una contradicción con el plan,

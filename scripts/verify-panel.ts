@@ -455,7 +455,7 @@ const PERMITIDAS = new Set([
   '--sub-color', '--sub-color-borde', '--sub-borde', '--sub-words', '--sub-animate',
   '--max-per-window', '--window', '--min', '--max', '--solo', '--clip',
   '--titulo-texto', '--titulo-arriba', '--titulo-tam',
-  '--titulo-color', '--titulo-color-borde', '--titulo-borde',
+  '--titulo-color', '--titulo-color-borde', '--titulo-borde', '--encuadre',
 ])
 const args = jobEnBase?.args ?? []
 const banderas = args.filter((a) => a.startsWith('--'))

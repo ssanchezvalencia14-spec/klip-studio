@@ -6,6 +6,7 @@ import { ffmpeg, probe } from '../lib/proc.js'
 import type { Transcript } from '../types.js'
 import { buildAss, PLAY_RES_X, PLAY_RES_Y, type AssOptions } from './ass.js'
 import { argsCalidadVideo, bitrateAudio } from './calidad.js'
+import { planificarEncuadre, type PlanEncuadre } from './rostros.js'
 
 const log = createLogger('render')
 
@@ -23,6 +24,13 @@ export interface RenderClip {
   start: number
   end: number
   caption?: string
+  /** Titulo corto (Fase 6). Es lo que va en el rotulo de arriba si existe. */
+  titulo?: string
+  /**
+   * Subtitulos editados a mano en el panel (Fase 6), en segundos del video
+   * largo. Si vienen, sustituyen a la transcripcion en este clip.
+   */
+  subtitulos?: { start: number; end: number; text: string }[] | null
 }
 
 /**
@@ -39,6 +47,27 @@ export interface RenderClip {
 /** Donde va el fotograma limpio de un clip: al lado del MP4, en .jpg. */
 export function rutaFotograma(clipMp4: string): string {
   return clipMp4.replace(/\.mp4$/i, '') + '.fotograma.jpg'
+}
+
+/**
+ * Filtergraph del encuadre que sigue la cara (Fase 6).
+ *
+ * Recorta una ventana vertical (9:16 de la altura) que se mueve a lo largo
+ * del clip con los comandos de sendcmd (src/render/rostros.ts) y la escala a
+ * 1080x1920. Sin fondo borroso: la cara llena el encuadre.
+ */
+export function buildFilterGraphRostro(
+  assPath: string | null,
+  plan: { anchoCrop: number; altoCrop: number; x0: number; rutaComandos: string | null },
+): string {
+  const ultima = assPath === null ? 'vout' : 'v1'
+  const partes = [
+    (plan.rutaComandos === null ? '[0:v]' : `[0:v]sendcmd=f=${toFilterPath(plan.rutaComandos)},`) +
+      `crop=w=${plan.anchoCrop}:h=${plan.altoCrop}:x=${plan.x0}:y=0,` +
+      `scale=${PLAY_RES_X}:${PLAY_RES_Y}:flags=lanczos,setsar=1[${ultima}]`,
+  ]
+  if (assPath !== null) partes.push(`[v1]ass=${toFilterPath(assPath)}[vout]`)
+  return partes.join(';')
 }
 
 export function buildFilterGraph(assPath: string | null, blurSigma: number): string {
@@ -147,6 +176,12 @@ export interface RenderOptions {
    * al fichero .ass.
    */
   rotulo?: string
+  /**
+   * Encuadre vertical (Fase 6). 'rostro' sigue la cara (y a quien habla, si
+   * hay varias); 'clasico' centra el video sobre un fondo borroso. Si el
+   * seguimiento no es posible, se cae al clasico sin fallar.
+   */
+  encuadre?: 'rostro' | 'clasico'
 }
 
 /** Renderiza un clip vertical, con subtitulos quemados salvo que se apaguen. */
@@ -174,10 +209,12 @@ export async function renderClip(
    * no trae pie, el rotulo se queda vacio y buildAss no lo pinta: mejor sin
    * rotulo que con la plantilla cruda y un hueco donde iba el texto.
    */
+  // Fase 6: el rotulo usa el titulo corto; si no hay, la descripcion.
+  const textoRotulo = (clip.titulo ?? '').trim() !== '' ? (clip.titulo ?? '').trim() : (clip.caption ?? '')
   const rotulo = (options.rotulo ?? '').includes('{titulo}')
-    ? (options.rotulo ?? '').replaceAll('{titulo}', clip.caption ?? '').trim()
+    ? (options.rotulo ?? '').replaceAll('{titulo}', textoRotulo).trim()
     : ''
-  const conRotulo = rotulo !== '' && (clip.caption ?? '') !== ''
+  const conRotulo = rotulo !== '' && textoRotulo !== ''
 
   /*
    * Hay fichero .ass si hay subtitulos O rotulo.
@@ -197,7 +234,8 @@ export async function renderClip(
       : buildAss(
           // Sin subtitulos, el .ass se escribe solo para el rotulo: no se le
           // pasa ningun segmento y de ahi no sale ningun Dialogue de habla.
-          conSubs ? transcript.segments : [],
+          // Los subtitulos editados en el panel mandan sobre la transcripcion.
+          conSubs ? (clip.subtitulos && clip.subtitulos.length > 0 ? clip.subtitulos : transcript.segments) : [],
           clip.start,
           clip.end,
           assPath,
@@ -205,6 +243,21 @@ export async function renderClip(
         )
 
   const duration = clip.end - clip.start
+
+  /*
+   * El plan de recorte siguiendo la cara, si se pidio y se puede. Cualquier
+   * fallo (sin modelo, sin caras, ffmpeg) deja el modo clasico: un clip con
+   * fondo borroso es mejor que ningun clip.
+   */
+  let plan: PlanEncuadre | null = null
+  if ((options.encuadre ?? 'rostro') === 'rostro') {
+    try {
+      plan = await planificarEncuadre(sourceVideo, transcript.sourceId, index, clip.start, duration)
+    } catch (error) {
+      log.warn(`Clip ${index}: no se pudo seguir la cara (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); modo clásico.`)
+      plan = null
+    }
+  }
   const blurSigma = options.blurSigma ?? Number(optionalEnv('BLUR_SIGMA') ?? '30')
   const cq = options.cq ?? Number(optionalEnv('NVENC_CQ') ?? '24')
   const preset = options.preset ?? optionalEnv('NVENC_PRESET') ?? 'p6'
@@ -225,7 +278,7 @@ export async function renderClip(
     '-i',
     sourceVideo,
     '-filter_complex',
-    buildFilterGraph(assPath, blurSigma),
+    plan === null ? buildFilterGraph(assPath, blurSigma) : buildFilterGraphRostro(assPath, plan),
     '-map',
     '[vout]',
     '-map',
@@ -280,7 +333,8 @@ export async function renderClip(
       '-i',
       sourceVideo,
       '-filter_complex',
-      buildFilterGraph(null, blurSigma) + ';[vout]scale=540:960[foto]',
+      (plan === null ? buildFilterGraph(null, blurSigma) : buildFilterGraphRostro(null, { ...plan, rutaComandos: null })) +
+        ';[vout]scale=540:960[foto]',
       '-map',
       '[foto]',
       '-frames:v',

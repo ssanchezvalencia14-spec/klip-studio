@@ -116,6 +116,13 @@ export interface ClipSettings {
   tituloColor: string
   tituloColorBorde: string
   tituloBorde: number
+
+  /**
+   * Encuadre vertical: 'rostro' sigue la cara de quien habla; 'clasico' pone
+   * el video entero sobre un fondo borroso. Sin el detector instalado, el
+   * render cae al clasico solo.
+   */
+  encuadre: string
 }
 
 export const CLIP_DEFAULTS: ClipSettings = {
@@ -149,6 +156,7 @@ export const CLIP_DEFAULTS: ClipSettings = {
   tituloColor: '#FFFFFF',
   tituloColorBorde: '#000000',
   tituloBorde: 6,
+  encuadre: 'rostro',
 }
 
 /**
@@ -190,6 +198,7 @@ type Numericos = Exclude<
   | 'tituloTexto'
   | 'tituloColor'
   | 'tituloColorBorde'
+  | 'encuadre'
 >
 
 const LIMITS: Record<Numericos, [number, number]> = {
@@ -238,6 +247,8 @@ export const PROVEEDORES = ['upload-post', 'tiktok'] as const
 export const MODOS = ['direct', 'draft'] as const
 /** Quien elige los momentos. */
 export const SELECTORES = ['anthropic', 'local'] as const
+/** Como se pasa el video horizontal a vertical. */
+export const ENCUADRES = ['rostro', 'clasico'] as const
 
 export const PRIVACIDADES = [
   'PUBLIC_TO_EVERYONE',
@@ -285,6 +296,9 @@ export function validateClipSettings(merged: ClipSettings): ClipSettings {
   }
   if (!MODOS.includes(merged.modo as (typeof MODOS)[number])) {
     throw new InvalidClipSettings(`El modo ${merged.modo} no existe.`)
+  }
+  if (!ENCUADRES.includes(merged.encuadre as (typeof ENCUADRES)[number])) {
+    throw new InvalidClipSettings(`El encuadre ${merged.encuadre} no existe.`)
   }
   if (!SELECTORES.includes(merged.selector as (typeof SELECTORES)[number])) {
     throw new InvalidClipSettings(`El selector ${merged.selector} no existe.`)
@@ -385,6 +399,7 @@ export const COLUMNAS: Record<keyof ClipSettings, string> = {
   tituloColor: 'titulo_color',
   tituloColorBorde: 'titulo_color_borde',
   tituloBorde: 'titulo_borde',
+  encuadre: 'encuadre',
 }
 
 /**
@@ -459,6 +474,8 @@ export function ajustesDeFila(fila: Record<string, unknown>): ClipSettings {
   }
   const modo = fila[COLUMNAS.modo]
   if (typeof modo === 'string' && MODOS.includes(modo as (typeof MODOS)[number])) out.modo = modo
+  const enc = fila[COLUMNAS.encuadre]
+  if (typeof enc === 'string' && ENCUADRES.includes(enc as (typeof ENCUADRES)[number])) out.encuadre = enc
   const sel = fila[COLUMNAS.selector]
   if (typeof sel === 'string' && SELECTORES.includes(sel as (typeof SELECTORES)[number])) {
     out.selector = sel

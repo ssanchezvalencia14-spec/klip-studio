@@ -327,6 +327,16 @@ export function buildJob(
         )
       }
 
+      /*
+       * El encuadre solo viaja cuando es el clasico: seguir la cara es lo
+       * normal y el render lo hace sin bandera. Lista cerrada, como todo lo
+       * que acaba en la linea de comando.
+       */
+      if (ajustes.encuadre === 'clasico') args.push('--encuadre', 'clasico')
+      else if (ajustes.encuadre !== 'rostro') {
+        throw new BadRequest(`El encuadre ${ajustes.encuadre} no existe.`)
+      }
+
       return {
         kind: 'render',
         args,

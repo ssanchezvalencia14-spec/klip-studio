@@ -1390,6 +1390,76 @@ function pintarProcesador(d) {
   '</div></article>';
 }
 
+/**
+ * Las alertas (Fase 7): a donde llegan, si estan encendidas y las ultimas.
+ *
+ * Los destinos se ponen en el .env del panel, no aqui: son claves.
+ */
+function pintarAlertas(d) {
+  if (!d || !d.alertas) return '';
+  const a = d.alertas;
+  const admin = !state.yo || state.yo.rol === 'admin';
+  const destinos = [a.canales.telegram ? 'Telegram' : '', a.canales.correo ? 'correo' : ''].filter(Boolean);
+  const NOMBRE = { token: 'Permiso de cuenta', cola: 'Agenda vacía', publicacion: 'Publicación fallida',
+    procesador: 'Procesador', ia: 'IA', prueba: 'Prueba' };
+  return '<article class="card"><div class="body">' +
+    '<p class="ante">Alertas</p>' +
+    '<p class="reason" style="margin:0 0 var(--s3)">' +
+      'Avisa cuando falla el permiso de una cuenta, se vacía la agenda, falla una publicación, ' +
+      'se desconecta el procesador o la IA llega al límite. La misma alerta no se repite en el día.</p>' +
+    '<ul class="estado-lista">' +
+      '<li>' + ico('alerta') + '<span class="estado-nombre">Destino</span>' +
+        '<span class="estado-texto">' + (destinos.length
+          ? destinos.join(' y ')
+          : 'ninguno: añade TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID al .env del panel') + '</span>' +
+        '<span class="vivo-punto' + (destinos.length ? '' : ' apagado') + '"></span></li>' +
+    '</ul>' +
+    (admin
+      ? '<div class="chips">' +
+          '<button class="chip" data-alertas-activas="' + (a.activas ? '0' : '1') + '">' +
+            (a.activas ? 'Apagar las alertas' : 'Encender las alertas') + '</button>' +
+          (destinos.length ? '<button class="chip primario" data-alertas-probar>Enviar una prueba</button>' : '') +
+        '</div>'
+      : '') +
+    (a.ultimas.length
+      ? '<details class="nota" style="margin-top:var(--s3)"><summary>Últimas alertas</summary><ul class="lista-alertas">' +
+          a.ultimas.map(x => '<li><b>' + esc(NOMBRE[x.tipo] || x.tipo) + '</b> · ' + esc(hace(x.enviadaEn)) +
+            (x.canales ? '' : ' · <span class="reason" style="margin:0">no salió: sin destino</span>') +
+            '<br><span class="reason" style="margin:0">' + esc(x.texto) + '</span></li>').join('') +
+        '</ul></details>'
+      : '') +
+  '</div></article>';
+}
+
+document.addEventListener('click', async e => {
+  const activar = e.target.closest('[data-alertas-activas]');
+  if (activar) {
+    try {
+      state.sistema.alertas = await api('/api/sistema/alertas', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ activas: activar.dataset.alertasActivas === '1' }),
+      });
+      render();
+    } catch (err) { alert(err.message); }
+    return;
+  }
+  const probar = e.target.closest('[data-alertas-probar]');
+  if (probar) {
+    probar.disabled = true;
+    try {
+      const r = await api('/api/sistema/alertas/probar', { method: 'POST' });
+      state.sistema.alertas = r;
+      const mal = r.resultados.filter(x => !x.ok);
+      avisar(mal.length === 0 ? 'Alerta de prueba enviada.' : mal.map(x => x.detalle).join(' '));
+      render();
+    } catch (err) {
+      probar.disabled = false;
+      alert(err.message);
+    }
+  }
+});
+
 async function guardarSistema(cambios) {
   try {
     await api('/api/sistema', {
@@ -3940,7 +4010,7 @@ function render() {
   pintarEstadoMenu();
   if (state.view === 'clips') view.innerHTML = vistaClips();
   if (state.view === 'cola') view.innerHTML = vistaCola();
-  if (state.view === 'registro') view.innerHTML = pintarProcesador(state.sistema) + vistaRegistro();
+  if (state.view === 'registro') view.innerHTML = pintarProcesador(state.sistema) + pintarAlertas(state.sistema) + vistaRegistro();
   if (state.view === 'ia') view.innerHTML = vistaIA();
   if (state.view === 'usuarios') view.innerHTML = vistaUsuarios();
   if (state.view === 'flujo') view.innerHTML = vistaFlujo();

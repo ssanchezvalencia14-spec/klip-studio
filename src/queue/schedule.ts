@@ -130,9 +130,16 @@ export function planSchedule(
       return (lastUsedAt.get(a) ?? 0) - (lastUsedAt.get(b) ?? 0)
     })
 
+    // Todos los clips en el tope de repeticiones: el hueco se queda vacio.
+    if (ranked.length === 0) {
+      sinClip += 1
+      continue
+    }
+
     // La restriccion por cuenta es la dura: se prefiere violar el enfriamiento
     // global antes que hacer que una cuenta repita video. Que dos cuentas
     // compartan clip pasa desapercibido; que una lo suba dos veces, no.
+
     const notUsedByAccount = ranked.filter((id) => !usedByAccount(id))
     const pool = notUsedByAccount.length > 0 ? notUsedByAccount : ranked
 

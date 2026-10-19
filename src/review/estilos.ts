@@ -2584,4 +2584,5 @@ export const CSS = `  :root {
   .editor-cuenta .plats { border: 0; padding: 0; margin: 0; display: flex; gap: var(--s3); flex-wrap: wrap; }
   .editor-cuenta .plats legend { padding: 0; margin-bottom: var(--s2); font-size: var(--t-meta); color: var(--dim); }
   .opcion-plat { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .lista-alertas { list-style: none; padding: 0; margin: var(--s2) 0 0; display: grid; gap: var(--s2); }
 `

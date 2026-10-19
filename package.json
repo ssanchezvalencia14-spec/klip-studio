@@ -17,6 +17,7 @@
     "verify:procesador": "tsx scripts/verify-procesador.ts",
     "verify:fase5": "tsx scripts/verify-fase5.ts",
     "verify:fase6": "tsx scripts/verify-fase6.ts",
+    "verify:fase7": "tsx scripts/verify-fase7.ts",
     "ingest": "tsx scripts/ingest.ts",
     "select": "tsx scripts/select.ts",
     "typecheck": "tsc --noEmit",

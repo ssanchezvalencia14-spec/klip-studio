@@ -36,6 +36,8 @@ import { canjearCodigo, credenciales, enlaceAutorizacion } from '../publish/tikt
 import { TikTokProvider } from '../publish/providers/tiktok.js'
 import { crearTokens } from '../publish/tiktok/tokens.js'
 import { crearProyectos, ProyectoError } from '../store/proyectos.js'
+import { canalesConfigurados } from '../alertas/canales.js'
+import { iniciarVigia, probarAlertas, ultimasAlertas } from '../alertas/vigia.js'
 import { paginaPrivacidad, paginaTerminos } from './legal.js'
 import { crearNube, type Nube } from '../store/nube.js'
 import { PLATAFORMAS, repartirFranjas, type Plataforma } from '../store/store.js'
@@ -1431,7 +1433,38 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       estado: await sis.estado(),
       trabajador: await cola.trabajadorVivo(),
       navegadores: NAVEGADORES_COOKIES,
+      alertas: await resumenAlertas(db, ownerId),
     })
+    return
+  }
+
+  /*
+   * Alertas (Fase 7): encender o apagar, y mandar una de prueba.
+   *
+   * Los destinos no se configuran aqui: son claves (token de Telegram, clave
+   * del correo) y viven en el .env. El panel solo dice si estan puestas.
+   */
+  if (path === '/api/sistema/alertas' && req.method === 'PUT') {
+    const b = (await readBody(req)) as { activas?: unknown }
+    await db.query(
+      `insert into settings (owner_id, alertas_activas) values ($1, $2)
+       on conflict (owner_id) do update set alertas_activas = excluded.alertas_activas`,
+      [ownerId, b.activas !== false],
+    )
+    sendJson(res, 200, await resumenAlertas(db, ownerId))
+    return
+  }
+
+  if (path === '/api/sistema/alertas/probar' && req.method === 'POST') {
+    const conf = canalesConfigurados()
+    if (!conf.telegram && !conf.correo) {
+      sendJson(res, 400, {
+        error: 'No hay ningún destino configurado. Añade TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID (o la clave de correo) al .env del panel.',
+      })
+      return
+    }
+    const resultados = await probarAlertas(db, ownerId)
+    sendJson(res, 200, { resultados, ...(await resumenAlertas(db, ownerId)) })
     return
   }
 
@@ -2659,6 +2692,24 @@ function localAddresses(): string[] {
   return found
 }
 
+/** Lo que Ajustes > Sistema enseña de las alertas. Nunca las claves. */
+async function resumenAlertas(db: Db, ownerId: string): Promise<Record<string, unknown>> {
+  try {
+    const filas = await db.query<{ alertas_activas: boolean | null }>(
+      `select alertas_activas from settings where owner_id = $1`,
+      [ownerId],
+    )
+    return {
+      canales: canalesConfigurados(),
+      activas: filas[0]?.alertas_activas !== false,
+      ultimas: await ultimasAlertas(db, ownerId),
+    }
+  } catch {
+    // Sin la migracion 024.
+    return { canales: canalesConfigurados(), activas: false, ultimas: [] }
+  }
+}
+
 export interface ReviewServerOptions {
   port: number
   db: Db
@@ -2683,6 +2734,9 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
     buildJob(kind, { sourceId }, new Set([sourceId]), await loadClipSettings(db, ownerId)).args,
   )
   vigilarTareas(ctx.cola)
+  // Alertas por Telegram o correo: el panel vigila, porque si el que se cae es
+  // el procesador alguien de fuera tiene que darse cuenta (Fase 7).
+  iniciarVigia(db, ownerId)
 
   const server = createServer((req, res) => {
     handle(req, res, ctx).catch((error: unknown) => {

@@ -47,6 +47,7 @@ import { BadRequest, buildJob } from './pipeline.js'
 import { storeUpload, UploadError } from './upload.js'
 import { createEstadoIA, iaPausada, textoEstadoIA } from '../llm/estado.js'
 import { createAuth, ErrorUsuarios, permitido, type Auth } from '../auth/auth.js'
+import { createSistema, NAVEGADORES_COOKIES } from '../jobs/sistema.js'
 import {
   atenderAcceso,
   esCifrada,
@@ -1335,6 +1336,37 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
 
   if (path === '/api/overview' && req.method === 'GET') {
     sendJson(res, 200, await buildOverview(store, cola, db, ownerId))
+    return
+  }
+
+  // --- Procesador ----------------------------------------------------------------
+
+  /*
+   * Lo que el trabajador sabe del PC (yt-dlp, disco, limpieza) y sus ajustes
+   * (cookies para yt-dlp, dias de retencion). Cambiarlos es de administrador.
+   */
+  if (path === '/api/sistema' && req.method === 'GET') {
+    const sis = createSistema(db, ownerId)
+    sendJson(res, 200, {
+      ajustes: await sis.ajustes(),
+      estado: await sis.estado(),
+      trabajador: await cola.trabajadorVivo(),
+      navegadores: NAVEGADORES_COOKIES,
+    })
+    return
+  }
+
+  if (path === '/api/sistema' && req.method === 'PUT') {
+    const b = (await readBody(req)) as { ytdlpCookies?: unknown; retencionDias?: unknown }
+    try {
+      const ajustes = await createSistema(db, ownerId).guardarAjustes({
+        ...(typeof b.ytdlpCookies === 'string' ? { ytdlpCookies: b.ytdlpCookies } : {}),
+        ...(b.retencionDias !== undefined ? { retencionDias: Number(b.retencionDias) } : {}),
+      })
+      sendJson(res, 200, { ajustes })
+    } catch (e) {
+      sendJson(res, 400, { error: e instanceof Error ? e.message : 'No se pudo guardar.' })
+    }
     return
   }
 

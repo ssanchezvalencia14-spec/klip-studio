@@ -439,7 +439,11 @@ async function refrescar() {
     state.queue = cola;
     state.overview = overview;
   }
-  if (state.view === 'registro') state.runs = await api('/api/runs');
+  if (state.view === 'registro') {
+    const [runs, sistema] = await Promise.all([api('/api/runs'), api('/api/sistema')]);
+    state.runs = runs;
+    state.sistema = sistema;
+  }
   if (state.view === 'ia') {
     // Las tareas tambien: "Probar IA" es una tarea y hay que ver si sigue en marcha.
     const [ia, jobs] = await Promise.all([api('/api/ia'), api('/api/jobs')]);
@@ -1041,6 +1045,9 @@ function estadoVideo(s, o) {
 function notaVideo(s, e, o) {
   if (e.error) return 'Algo falló en «' + (ETAPAS[Math.max(0, e.ahora)] || 'el último paso') + '». Puedes reintentarlo.';
   if (e.esperaIA) return o.ia ? textoIA(o.ia) + '.' : 'Esperando a la IA.';
+  if (e.activo && e.activo.status === 'queued' && e.activo.noAntesDe && new Date(e.activo.noAntesDe) > new Date()) {
+    return 'Falló; se reintenta sola a las ' + horaCortaDe(e.activo.noAntesDe) + '.';
+  }
   if (e.listo) {
     return e.pendientes > 0
       ? (e.pendientes === 1 ? '1 clip espera tu revisión.' : e.pendientes + ' clips esperan tu revisión.')
@@ -1279,13 +1286,123 @@ function nombreTarea(j) {
   return etiquetas[j.kind] || j.label;
 }
 
+
+/*
+ * El procesador lleva mas de cinco minutos sin dar señales.
+ *
+ * Un minuto puede ser un reinicio o una red que va y viene; cinco ya es que
+ * el PC esta apagado o el trabajador no esta corriendo, y lo que se añada no
+ * va a avanzar hasta que alguien lo arregle.
+ */
+function pintarAvisoProcesador(o) {
+  const t = o.trabajador;
+  if (!t || t.vivo) return '';
+  const minutos = t.vistoEn ? (Date.now() - new Date(t.vistoEn).getTime()) / 60000 : Infinity;
+  if (minutos < 5) return '';
+  return '<article class="card"><div class="body"><div class="warn" style="margin:0">' +
+    '<b>El procesador está desconectado' + (t.vistoEn ? ' desde ' + hace(t.vistoEn) : '') + '.</b> ' +
+    'Lo que añadas espera hasta que se conecte. Comprueba que el ordenador que procesa esté encendido ' +
+    'y con el trabajador en marcha.' +
+  '</div></div></article>';
+}
+
+/** Hora corta (HH:MM) de una fecha. */
+function horaCortaDe(iso) {
+  return new Date(iso).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/*
+ * Ajustes, Sistema: el procesador.
+ *
+ * Si esta conectado, que version de yt-dlp tiene, cuanto disco queda y que
+ * se borra solo. Las cookies y los dias de retencion solo los cambia un
+ * administrador (el servidor lo comprueba igual).
+ */
+function pintarProcesador(d) {
+  if (!d) return '';
+  const admin = !state.yo || state.yo.rol === 'admin';
+  const t = d.trabajador || {};
+  const ytdlp = (d.estado.ytdlp && d.estado.ytdlp.valor) || null;
+  const disco = (d.estado.disco && d.estado.disco.valor) || null;
+  const ret = (d.estado.retencion && d.estado.retencion.valor) || null;
+  const usado = disco ? Math.round(disco.usado * 100) : null;
+  const nombres = { '': 'Ninguno', chrome: 'Chrome', edge: 'Edge', firefox: 'Firefox', brave: 'Brave', opera: 'Opera', vivaldi: 'Vivaldi', chromium: 'Chromium' };
+
+  return '<article class="card procesador-card"><div class="body">' +
+    '<p class="ante">Procesador</p>' +
+    '<ul class="estado-lista">' +
+      '<li>' + ico('procesador') + '<span class="estado-nombre">Conexión</span>' +
+        '<span class="estado-texto">' + (t.vivo ? 'conectado' : t.vistoEn ? 'desconectado desde ' + hace(t.vistoEn) : 'nunca se ha conectado') + '</span>' +
+        '<span class="vivo-punto' + (t.vivo ? '' : ' apagado') + '"></span></li>' +
+      '<li>' + ico('videos') + '<span class="estado-nombre">yt-dlp</span>' +
+        '<span class="estado-texto">' + (ytdlp
+          ? (ytdlp.version ? '<span class="dato">' + esc(ytdlp.version) + '</span>' : '') +
+            (ytdlp.dias !== null && ytdlp.dias !== undefined ? ' · hace ' + plural(ytdlp.dias, 'día') : '') +
+            (ytdlp.mensaje ? esc(ytdlp.mensaje) : '') +
+            (ytdlp.actualizacion ? '<br><span class="reason">' + esc(ytdlp.actualizacion) + '</span>' : '')
+          : 'se comprueba una vez por semana') + '</span>' +
+        '<span class="vivo-punto' + (!ytdlp || ytdlp.ok ? '' : ' espera') + '"></span></li>' +
+      '<li>' + ico('actividad') + '<span class="estado-nombre">Disco</span>' +
+        '<span class="estado-texto">' + (disco
+          ? usado + ' % usado · ' + disco.libreGb + ' GB libres'
+          : 'sin medir todavía') + '</span>' +
+        '<span class="vivo-punto' + (usado !== null && usado >= 80 ? ' apagado' : '') + '"></span></li>' +
+    '</ul>' +
+    (usado !== null && usado >= 80
+      ? '<p class="warn" style="margin:0 0 var(--s3)">El disco del procesador pasa del 80 %. ' +
+        'Activa la limpieza de abajo o libera espacio antes de añadir más videos.</p>'
+      : '') +
+    '<div class="field"><label for="retencion">Borrar el video original revisado tras</label>' +
+      '<div class="fila-input"><input id="retencion" type="number" min="0" max="365" step="1" value="' +
+        d.ajustes.retencionDias + '"' + (admin ? '' : ' disabled') + '>' +
+        '<span class="unidad">días</span>' +
+        (admin ? '<button class="chip" data-sistema-guardar="retencion">Guardar</button>' : '') +
+      '</div>' +
+      '<p class="reason" style="margin:var(--s2) 0 0">0 = no borrar nunca. Solo se borra el video largo ' +
+        'y los clips descartados; el texto y los clips aprobados se quedan.' +
+        (ret && ret.mb ? ' Última limpieza: ' + ret.mb + ' MB liberados.' : '') + '</p>' +
+    '</div>' +
+    '<div class="field"><label for="cookies-ytdlp">Cookies del navegador para YouTube</label>' +
+      '<select id="cookies-ytdlp" data-sistema="ytdlpCookies"' + (admin ? '' : ' disabled') + '>' +
+        d.navegadores.map(n => '<option value="' + n + '"' + (n === d.ajustes.ytdlpCookies ? ' selected' : '') + '>' +
+          (nombres[n] || n) + '</option>').join('') +
+      '</select>' +
+      '<p class="reason" style="margin:var(--s2) 0 0">Solo si YouTube pide confirmar que no eres un bot. ' +
+        'yt-dlp usará la sesión de ese navegador en el ordenador que procesa; ciérralo antes de descargar.</p>' +
+    '</div>' +
+  '</div></article>';
+}
+
+async function guardarSistema(cambios) {
+  try {
+    await api('/api/sistema', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cambios),
+    });
+    avisar('Guardado.');
+  } catch (err) {
+    avisar(err.message);
+  }
+  refrescar();
+}
+
+document.addEventListener('change', e => {
+  if (e.target.matches && e.target.matches('[data-sistema="ytdlpCookies"]')) guardarSistema({ ytdlpCookies: e.target.value });
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-sistema-guardar="retencion"]');
+  if (!b) return;
+  guardarSistema({ retencionDias: Number(document.getElementById('retencion').value) });
+});
+
 function vistaProceso() {
   const o = state.overview;
   if (!o) return esqueleto(2, true);
 
   const fallos = agruparFallos(state.jobs).slice(0, 3);
   // Con la IA en pausa, eso YA es el siguiente paso: no se repite abajo.
-  const avisos = (o.ia && o.ia.pausada ? '' : pintarAvisoIA(o.ia)) + fallos.map(pintarGrupoFallo).join('');
+  const avisos = pintarAvisoProcesador(o) + (o.ia && o.ia.pausada ? '' : pintarAvisoIA(o.ia)) + fallos.map(pintarGrupoFallo).join('');
 
   return pintarFlujo(o) +
     '<div class="rejilla-inicio">' +
@@ -3563,7 +3680,7 @@ function render() {
   pintarEstadoMenu();
   if (state.view === 'clips') view.innerHTML = vistaClips();
   if (state.view === 'cola') view.innerHTML = vistaCola();
-  if (state.view === 'registro') view.innerHTML = vistaRegistro();
+  if (state.view === 'registro') view.innerHTML = pintarProcesador(state.sistema) + vistaRegistro();
   if (state.view === 'ia') view.innerHTML = vistaIA();
   if (state.view === 'usuarios') view.innerHTML = vistaUsuarios();
   if (state.view === 'flujo') view.innerHTML = vistaFlujo();

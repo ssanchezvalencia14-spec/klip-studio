@@ -298,7 +298,7 @@ export type Auth = ReturnType<typeof createAuth>
  */
 const SOLO_ADMIN_ESCRITURA = [
   '/api/settings', '/api/ajustes', '/api/plantillas', '/api/proyectos',
-  '/api/cuentas', '/api/plataformas', '/api/ia',
+  '/api/cuentas', '/api/plataformas', '/api/ia', '/api/sistema',
 ]
 
 export function permitido(rol: Rol, metodo: string, ruta: string): boolean {

@@ -120,6 +120,8 @@ const state = {
   filtroCuentas: { texto: '', estado: '', cliente: '' },
   /** Cuentas marcadas para una accion en lote. */
   selCuentas: new Set(),
+  // Fase 7: la cuenta con el editor abierto (alias, tope, plataformas).
+  editCuenta: null,
   /** El ajuste que el buscador pidio resaltar, hasta que se pinte. */
   resaltar: null,
   /** Los clips marcados para decidir en lote. Llave: fuente + clip. */
@@ -3741,9 +3743,7 @@ function listaCuentas() {
             // deshacer el recorte.
             '<button class="enlace" data-ctodas>Marcar las ' + visibles.length + '</button></p>'
           : '') +
-        '<ul class="lista-campanas">' +
-          pintadas.map(c => filaCuenta(c, nombre, porUploadPost, conCasilla)).join('') +
-        '</ul>' +
+        gruposCuentas(pintadas, d.clientes ?? [], nombre, porUploadPost, conCasilla) +
         (ocultas > 0
           ? '<p class="reason" style="margin:var(--s3) 0 0">' +
             'Y ' + plural(ocultas, 'cuenta') + ' más. Busca o filtra para verlas.</p>'
@@ -5854,7 +5854,7 @@ function cuentasVisibles(todas) {
     if (f.cliente === 'sin' && c.clienteId) return false;
     if (f.cliente !== '' && f.cliente !== 'sin' && c.clienteId !== f.cliente) return false;
     if (q.length === 0) return true;
-    const texto = planoCuenta(c.id + ' ' + (c.tiktok ?? ''));
+    const texto = planoCuenta(c.id + ' ' + (c.alias ?? '') + ' ' + (c.tiktok ?? ''));
     return q.every(p => texto.includes(p));
   });
 }
@@ -5868,14 +5868,17 @@ function filaCuenta(c, nombre, porUploadPost, conCasilla) {
         ' aria-label="Marcar ' + esc(c.id) + '"></label>'
       : '') +
     '<span class="punto-estado ' + (c.activa ? 'si' : 'no') + '"></span>' +
-    '<span class="nombre">' + esc(c.id) + '</span>' +
+    '<span class="nombre">' + esc(c.alias || c.id) + '</span>' +
+    (c.alias ? '<span class="dato id-cuenta">' + esc(c.id) + '</span>' : '') +
     (c.activa ? '' : '<span class="badge">en pausa</span>') +
+    resultadoCuenta(c) +
+    (c.limiteDiario ? '<span class="badge">' + c.limiteDiario + ' al día</span>' : '') +
+    (c.plataformas ?? []).filter(p => p !== 'tiktok').map(p =>
+      '<span class="badge">' + (p === 'youtube' ? 'Shorts' : 'Reels') + '</span>').join('') +
     (c.tiktok
       ? '<span class="badge ok">@' + esc(c.tiktok) + '</span>'
       : (porUploadPost ? '' : '<span class="badge">sin enlazar</span>')) +
-    (c.clienteId
-      ? '<span class="badge">' + esc(nombre[c.clienteId] ?? '?') + '</span>'
-      : '') +
+    // El cliente ya no va en la fila: las cuentas se agrupan por cliente.
     (c.activa
       ? '<button class="chip" data-cpausar="' + esc(c.id) + '">Pausar</button>'
       : '<button class="chip" data-cactivar="' + esc(c.id) + '">Activar</button>' +
@@ -5889,7 +5892,93 @@ function filaCuenta(c, nombre, porUploadPost, conCasilla) {
       : (porUploadPost
           ? ''
           : '<button class="chip" data-cenlazar="' + esc(c.id) + '">Enlazar</button>')) +
+    '<button class="chip" data-ceditar="' + esc(c.id) + '"' +
+      (state.editCuenta === c.id ? ' aria-expanded="true"' : '') + '>Editar</button>' +
+  '</li>' +
+  (state.editCuenta === c.id ? editorCuenta(c) : '');
+}
+
+/**
+ * Lo ultimo que paso al publicar en la cuenta (Fase 7).
+ *
+ * El error completo va en el title (Ver detalles al pasar el raton): en la
+ * fila solo cabe si fue bien o mal y cuando.
+ */
+function resultadoCuenta(c) {
+  if (!c.ultimoResultado) return '';
+  if (c.ultimoResultado === 'ok') {
+    return '<span class="badge ok">Publicó ' + esc(hace(c.ultimoResultadoEn)) + '</span>';
+  }
+  return '<span class="badge error" title="' + esc(c.ultimoError ?? '') + '">Falló ' +
+    esc(hace(c.ultimoResultadoEn)) + '</span>';
+}
+
+/** Editor en linea: alias, tope diario y plataformas. */
+function editorCuenta(c) {
+  const plats = new Set(c.plataformas ?? ['tiktok']);
+  const caja = (v, t, disponible) =>
+    '<label class="opcion-plat"><input type="checkbox" data-cplat="' + v + '"' +
+      (plats.has(v) ? ' checked' : '') + (disponible ? '' : ' disabled') + '> ' + t + '</label>';
+  return '<li class="editor-cuenta">' +
+    '<div class="field"><label for="alias-' + esc(c.id) + '">Alias</label>' +
+      '<input id="alias-' + esc(c.id) + '" data-calias maxlength="40" value="' + esc(c.alias ?? '') + '"' +
+      ' placeholder="' + esc(c.id) + '" autocomplete="off"></div>' +
+    '<div class="field"><label for="tope-' + esc(c.id) + '">Publicaciones al día</label>' +
+      '<select id="tope-' + esc(c.id) + '" data-ctope>' +
+        '<option value="">Las del horario</option>' +
+        [1, 2, 3, 4, 5, 6, 8, 10].map(n =>
+          '<option value="' + n + '"' + (c.limiteDiario === n ? ' selected' : '') + '>Como mucho ' + n + '</option>').join('') +
+      '</select></div>' +
+    '<fieldset class="plats"><legend>Dónde publica</legend>' +
+      caja('tiktok', 'TikTok', false) +
+      caja('youtube', 'YouTube Shorts', plataformaLista('youtube')) +
+      caja('instagram', 'Instagram Reels', plataformaLista('instagram')) +
+    '</fieldset>' +
+    '<p class="reason" style="margin:0">Shorts y Reels salen por el mismo perfil de upload-post: ' +
+      'conéctalos allí antes de marcarlos.</p>' +
+    '<div class="chips"><button class="chip primario" data-cguardar="' + esc(c.id) + '">Guardar</button>' +
+      '<button class="chip" data-ceditar="' + esc(c.id) + '">Cancelar</button></div>' +
   '</li>';
+}
+
+/** Si una plataforma se puede marcar: solo las que el proveedor sabe publicar. */
+function plataformaLista(id) {
+  const p = (state.plataformas?.plataformas ?? []).find(x => x.id === id);
+  return !!p && p.estado !== 'no-disponible';
+}
+
+/**
+ * Las filas, agrupadas por cliente (Fase 7).
+ *
+ * Sin clientes creados es la lista de siempre: con dos cuentas y ningun
+ * cliente, una caja "Sin cliente" seria un vacio que no explica nada.
+ */
+function gruposCuentas(cuentas, clientes, nombre, porUploadPost, conCasilla) {
+  const fila = c => filaCuenta(c, nombre, porUploadPost, conCasilla);
+  if (!clientes || clientes.length === 0) {
+    return '<ul class="lista-campanas">' + cuentas.map(fila).join('') + '</ul>';
+  }
+  const grupos = clientes
+    .map(k => ({ id: k.id, nombre: k.nombre, cuentas: cuentas.filter(c => c.clienteId === k.id) }))
+    .filter(g => g.cuentas.length > 0);
+  const sin = cuentas.filter(c => !c.clienteId);
+  if (sin.length > 0) grupos.push({ id: 'sin', nombre: 'Sin cliente', cuentas: sin });
+  return grupos.map(g => {
+    const activas = g.cuentas.filter(c => c.activa).length;
+    const enlazadas = g.cuentas.filter(c => c.tiktok).length;
+    return '<section class="grupo-cuentas">' +
+      '<div class="grupo-cab">' +
+        '<h4>' + esc(g.nombre) + '</h4>' +
+        '<span class="reason" style="margin:0">' + plural(g.cuentas.length, 'cuenta') +
+          (activas < g.cuentas.length ? ', ' + activas + ' publican' : '') + '</span>' +
+        '<span class="hueco"></span>' +
+        (activas > 0 ? '<button class="chip" data-cgrupo="pausar" data-grupo="' + esc(g.id) + '">Pausar todas</button>' : '') +
+        (activas < g.cuentas.length ? '<button class="chip" data-cgrupo="activar" data-grupo="' + esc(g.id) + '">Activar todas</button>' : '') +
+        (enlazadas > 0 ? '<button class="chip" data-cgrupo="revisar" data-grupo="' + esc(g.id) + '">Comprobar todas</button>' : '') +
+      '</div>' +
+      '<ul class="lista-campanas">' + g.cuentas.map(fila).join('') + '</ul>' +
+    '</section>';
+  }).join('');
 }
 
 /** Buscador, filtros y barra de lotes. Solo a partir del umbral. */
@@ -6033,6 +6122,53 @@ document.addEventListener('click', e => {
  * Se mandan EN SERIE. En paralelo, veinte escrituras simultaneas sobre la
  * misma tabla de franjas se pisarian entre ellas.
  */
+document.addEventListener('click', async e => {
+  const editar = e.target.closest('[data-ceditar]');
+  if (editar) {
+    state.editCuenta = state.editCuenta === editar.dataset.ceditar ? null : editar.dataset.ceditar;
+    repintarCuentas();
+    return;
+  }
+
+  const guardar = e.target.closest('[data-cguardar]');
+  if (guardar) {
+    const caja = guardar.closest('.editor-cuenta');
+    const tope = caja.querySelector('[data-ctope]').value;
+    guardar.disabled = true;
+    try {
+      await api('/api/cuentas', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          accion: 'editar',
+          id: guardar.dataset.cguardar,
+          alias: caja.querySelector('[data-calias]').value,
+          limiteDiario: tope === '' ? null : Number(tope),
+          plataformas: [...caja.querySelectorAll('[data-cplat]:checked')].map(x => x.dataset.cplat),
+        }),
+      });
+      state.editCuenta = null;
+      avisar('Cuenta guardada.');
+      await refrescar();
+    } catch (err) {
+      guardar.disabled = false;
+      alert(err.message);
+    }
+    return;
+  }
+
+  const grupo = e.target.closest('[data-cgrupo]');
+  if (grupo) {
+    const id = grupo.dataset.grupo;
+    const accion = grupo.dataset.cgrupo;
+    const cuentas = (state.proyectos?.cuentas ?? []).filter(c =>
+      (id === 'sin' ? !c.clienteId : c.clienteId === id) &&
+      (accion === 'pausar' ? c.activa : accion === 'activar' ? !c.activa : !!c.tiktok));
+    state.selCuentas = new Set(cuentas.map(c => c.id));
+    await loteCuentasAccion(accion);
+  }
+});
+
 async function loteCuentasAccion(accion, clienteId) {
   const ids = [...state.selCuentas];
   if (ids.length === 0) return;
@@ -6069,7 +6205,10 @@ async function loteCuentasAccion(accion, clienteId) {
   // mandar veinte cuando entraron dieciocho es como no decir nada.
   avisar(
     plural(hechas, 'cuenta') + ' ' +
-    (accion === 'pausar' ? 'en pausa' : accion === 'activar' ? 'activada' + (hechas === 1 ? '' : 's') : 'reasignada' + (hechas === 1 ? '' : 's')) +
+    (accion === 'pausar' ? 'en pausa'
+      : accion === 'activar' ? 'activada' + (hechas === 1 ? '' : 's')
+      : accion === 'revisar' ? 'comprobada' + (hechas === 1 ? '' : 's')
+      : 'reasignada' + (hechas === 1 ? '' : 's')) +
     (fallos.length > 0 ? '. ' + plural(fallos.length, 'fallo') + ': ' + fallos[0] : '.'),
   );
   await refrescar();

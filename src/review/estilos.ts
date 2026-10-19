@@ -2571,4 +2571,17 @@ export const CSS = `  :root {
     padding: var(--s2) var(--s3); border-radius: 8px; font-size: var(--t-meta);
     background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); color: var(--aviso-texto); }
   .video-aviso svg { flex: none; width: 16px; height: 16px; margin-top: 2px; }
+  /* Cuentas agrupadas por cliente (Fase 7). */
+  .grupo-cuentas { margin-top: var(--s4); }
+  .grupo-cuentas + .grupo-cuentas { padding-top: var(--s4); border-top: 1px solid var(--line); }
+  .grupo-cab { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s2); }
+  .grupo-cab h4 { margin: 0; font-size: var(--t-cuerpo); }
+  .grupo-cab .hueco { flex: 1; }
+  .id-cuenta { color: var(--dim); font-size: var(--t-meta); }
+  .badge.error { background: var(--error-fondo); color: var(--error-texto); }
+  .lista-campanas li.editor-cuenta { display: grid; gap: var(--s3); padding: var(--s3);
+    border: 1px solid var(--line); border-radius: 10px; margin: var(--s2) 0; }
+  .editor-cuenta .plats { border: 0; padding: 0; margin: 0; display: flex; gap: var(--s3); flex-wrap: wrap; }
+  .editor-cuenta .plats legend { padding: 0; margin-bottom: var(--s2); font-size: var(--t-meta); color: var(--dim); }
+  .opcion-plat { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
 `

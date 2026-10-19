@@ -79,6 +79,18 @@ await pg.exec(`
     values ('${OWNER}', 'acc-01', 'Cuenta 1', '{10,14,18}'),
            ('${OWNER}', 'acc-02', 'Cuenta 2', '{11,15,19}');
 
+  -- Fase 7: un cliente con tres cuentas, alias y ultimo resultado.
+  insert into clientes (id, owner_id, nombre)
+    values ('22222222-2222-2222-2222-222222222222', '${OWNER}', 'Zoti Music');
+  insert into accounts (owner_id, id, label, slots, cliente_id, alias, ultimo_resultado,
+                        ultimo_resultado_en, ultimo_error, limite_diario, plataformas)
+    values ('${OWNER}', 'acc-03', 'Cuenta 3', '{}', '22222222-2222-2222-2222-222222222222',
+            'Zoti fans', 'ok', now() - interval '2 hours', null, null, '{tiktok}'),
+           ('${OWNER}', 'acc-04', 'Cuenta 4', '{}', '22222222-2222-2222-2222-222222222222',
+            '', 'error', now() - interval '30 minutes', 'El perfil acc-04 no existe en upload-post.', 2, '{tiktok}'),
+           ('${OWNER}', 'acc-05', 'Cuenta 5', '{}', '22222222-2222-2222-2222-222222222222',
+            'Zoti clips', null, null, null, null, '{tiktok,youtube}');
+
   insert into queue (id, owner_id, source_id, clip_id, account_id, variant_path,
                      checksum, scheduled_at, status)
     values ('q1', '${OWNER}', 'vod-uno', 'clip-04', 'acc-01', 'v1.mp4', 'aaa',

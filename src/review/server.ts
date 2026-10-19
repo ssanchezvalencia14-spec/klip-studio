@@ -38,7 +38,7 @@ import { crearTokens } from '../publish/tiktok/tokens.js'
 import { crearProyectos, ProyectoError } from '../store/proyectos.js'
 import { paginaPrivacidad, paginaTerminos } from './legal.js'
 import { crearNube, type Nube } from '../store/nube.js'
-import { repartirFranjas } from '../store/store.js'
+import { PLATAFORMAS, repartirFranjas, type Plataforma } from '../store/store.js'
 import type { ClipRecord, ClipStatus, Post } from '../store/store.js'
 import { PLANES_UPLOAD_POST, describirTope, planDe } from '../publish/planes.js'
 import { renderPage } from './page.js'
@@ -2306,6 +2306,53 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
             ? `${accountId} vuelve al reparto.`
             : `${accountId} queda fuera del reparto. Lo ya programado no se toca.`,
       })
+      return
+    }
+
+    /*
+     * Editar alias, tope diario y plataformas de una cuenta (Fase 7).
+     *
+     * Todo se valida aqui: el alias acaba en la lista y en los avisos, el tope
+     * en el reparto, y las plataformas en la peticion a upload-post.
+     */
+    if (body.accion === 'editar') {
+      const cambios: { alias?: string; limiteDiario?: number | null; plataformas?: Plataforma[] } = {}
+      if (body.alias !== undefined) {
+        const alias = typeof body.alias === 'string' ? body.alias.trim().replace(/\s+/g, ' ') : ''
+        if (alias.length > 40) {
+          sendJson(res, 400, { error: 'El alias no puede pasar de 40 caracteres.' })
+          return
+        }
+        cambios.alias = alias
+      }
+      if (body.limiteDiario !== undefined) {
+        if (body.limiteDiario === null || body.limiteDiario === '') {
+          cambios.limiteDiario = null
+        } else {
+          const n = Number(body.limiteDiario)
+          if (!Number.isInteger(n) || n < 1 || n > 10) {
+            sendJson(res, 400, { error: 'El tope diario va de 1 a 10 publicaciones.' })
+            return
+          }
+          cambios.limiteDiario = n
+        }
+      }
+      if (body.plataformas !== undefined) {
+        const lista = Array.isArray(body.plataformas) ? body.plataformas : []
+        if (!lista.every((p) => (PLATAFORMAS as readonly unknown[]).includes(p))) {
+          sendJson(res, 400, { error: 'Esa plataforma no existe.' })
+          return
+        }
+        // TikTok va siempre: es la plataforma principal y la que mide el reparto.
+        cambios.plataformas = [...new Set<Plataforma>(['tiktok', ...(lista as Plataforma[])])]
+      }
+      const existe = await store.accounts.editar(accountId, cambios)
+      if (!existe) {
+        sendJson(res, 404, { error: `No existe la cuenta ${accountId}.` })
+        return
+      }
+      avisarCambio('cuentas')
+      sendJson(res, 200, { mensaje: `${accountId} guardada.` })
       return
     }
 

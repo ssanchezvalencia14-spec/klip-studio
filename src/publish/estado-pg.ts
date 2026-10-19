@@ -189,6 +189,20 @@ export function crearEstadoPg(db: Db, ownerId: string): EstadoWorker {
       )
     },
 
+    resultado: async (accountId, ok, error) => {
+      // Sin la migracion 024 la columna no existe: no es motivo para parar
+      // una pasada de publicacion.
+      try {
+        await db.query(
+          `update accounts set ultimo_resultado = $3, ultimo_resultado_en = now(), ultimo_error = $4
+            where owner_id = $1 and id = $2`,
+          [ownerId, accountId, ok ? 'ok' : 'error', ok ? null : (error ?? '').slice(0, 500)],
+        )
+      } catch {
+        // nada
+      }
+    },
+
     accountStatus: async (accountId, status, token) => {
       // El estado del token solo se toca si viene: la mayoria de las pausas son
       // por otra cosa y poner 'unknown' borraria un 'ok' que era correcto.

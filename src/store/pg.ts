@@ -1,5 +1,6 @@
 import { proveedorActivo, type Proveedor } from '../publish/proveedor.js'
 import type { Db } from './db.js'
+import { PLATAFORMAS } from './store.js'
 import type {
   Account,
   AccountStatus,
@@ -9,6 +10,7 @@ import type {
   Post,
   QueueItem,
   SegmentoClip,
+  Plataforma,
 } from './store.js'
 
 /**
@@ -88,6 +90,16 @@ export interface Store {
      */
     setStatus(id: string, status: Account['status']): Promise<boolean>
     save(rows: Account[]): Promise<void>
+    /**
+     * Cambia lo que se edita a mano de una cuenta (Fase 7). Solo los campos
+     * que vienen; null en limiteDiario vuelve al horario general.
+     */
+    editar(
+      id: string,
+      cambios: { alias?: string; limiteDiario?: number | null; plataformas?: Plataforma[] },
+    ): Promise<boolean>
+    /** Lo ultimo que paso al publicar en ella, para la lista de cuentas. */
+    anotarResultado(id: string, ok: boolean, error?: string): Promise<void>
   }
   clips: {
     all(): Promise<ClipRecord[]>
@@ -181,6 +193,18 @@ function aCuenta(r: Record<string, unknown>): Account {
       r.last_published_at === null
         ? null
         : new Date(r.last_published_at as string).toISOString(),
+    clienteId: (r.cliente_id as string | null | undefined) ?? null,
+    alias: typeof r.alias === 'string' ? r.alias : '',
+    limiteDiario: r.limite_diario === null || r.limite_diario === undefined ? null : Number(r.limite_diario),
+    ultimoResultado: (r.ultimo_resultado as 'ok' | 'error' | null | undefined) ?? null,
+    ultimoResultadoEn:
+      r.ultimo_resultado_en === null || r.ultimo_resultado_en === undefined
+        ? null
+        : new Date(r.ultimo_resultado_en as string).toISOString(),
+    ultimoError: (r.ultimo_error as string | null | undefined) ?? null,
+    plataformas: Array.isArray(r.plataformas)
+      ? (r.plataformas as string[]).filter((p): p is Plataforma => (PLATAFORMAS as readonly string[]).includes(p))
+      : ['tiktok'],
   }
 }
 
@@ -257,6 +281,37 @@ export function createStore(db: Db, ownerId: string): Store {
           [ownerId, id, status],
         )
         return filas.length > 0
+      },
+
+      editar: async (id, cambios) => {
+        const filas = await db.query(
+          `update accounts set
+             alias = coalesce($3, alias),
+             limite_diario = case when $4::boolean then $5::integer else limite_diario end,
+             plataformas = coalesce($6::text[], plataformas)
+           where owner_id = $1 and id = $2
+           returning id`,
+          [
+            ownerId,
+            id,
+            cambios.alias ?? null,
+            cambios.limiteDiario !== undefined,
+            cambios.limiteDiario ?? null,
+            cambios.plataformas ?? null,
+          ],
+        )
+        return filas.length > 0
+      },
+
+      anotarResultado: async (id, ok, error) => {
+        await db.query(
+          `update accounts set
+             ultimo_resultado = $3,
+             ultimo_resultado_en = now(),
+             ultimo_error = $4
+           where owner_id = $1 and id = $2`,
+          [ownerId, id, ok ? 'ok' : 'error', ok ? null : (error ?? '').slice(0, 500)],
+        )
       },
 
       save: async (rows) => {

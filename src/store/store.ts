@@ -33,7 +33,26 @@ export interface Account {
   slots: number[]
   tokenStatus: 'ok' | 'expired' | 'unknown'
   lastPublishedAt: string | null
+  /*
+   * Fase 7. Opcionales: el almacen en ficheros y las pruebas antiguas no los
+   * traen, y ninguno es imprescindible para publicar.
+   */
+  /** Cliente al que pertenece, o null si no tiene. */
+  clienteId?: string | null
+  /** Nombre para personas ("Zoti fans"). Vacio = se enseña el identificador. */
+  alias?: string
+  /** Tope de publicaciones al dia de esta cuenta; null = el general. */
+  limiteDiario?: number | null
+  ultimoResultado?: 'ok' | 'error' | null
+  ultimoResultadoEn?: string | null
+  ultimoError?: string | null
+  /** Donde publica: 'tiktok' siempre; 'youtube' e 'instagram' si se activan. */
+  plataformas?: Plataforma[]
 }
+
+/** Plataformas a las que se puede publicar por upload-post. */
+export const PLATAFORMAS = ['tiktok', 'youtube', 'instagram'] as const
+export type Plataforma = (typeof PLATAFORMAS)[number]
 
 export type QueueStatus = 'pending' | 'publishing' | 'published' | 'failed'
 

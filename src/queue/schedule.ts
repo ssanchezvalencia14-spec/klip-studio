@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createLogger } from '../lib/logger.js'
 import type { Account } from '../store/store.js'
-import { loadSettings } from './settings.js'
+import { loadSettings, type FlowSettings } from './settings.js'
 
 const log = createLogger('schedule')
 
@@ -51,6 +51,19 @@ export interface ScheduleOptions {
   /** Dia base. Se planifica sobre este dia y los siguientes. */
   startDate: Date
   days: number
+  /**
+   * Los ajustes de Horarios. Sin esto se leen de state/settings.json, que es
+   * lo que hacia siempre: pero ese fichero no es lo que se guarda desde el
+   * panel (la base), y los cambios de Horarios no llegaban al reparto.
+   */
+  settings?: FlowSettings
+  /**
+   * Fase 7: cuantas veces como mucho sale el mismo clip, sumando todas las
+   * cuentas y lo ya programado (usosPrevios). Un hueco sin clip disponible
+   * se deja vacio antes que pasarse del tope.
+   */
+  maxRepeticiones?: number
+  usosPrevios?: Map<string, number>
 }
 
 /**
@@ -69,7 +82,8 @@ export function planSchedule(
   if (accounts.length === 0) throw new Error('No hay cuentas activas que planificar.')
   if (clipIds.length === 0) throw new Error('No hay clips que repartir.')
 
-  const settings = loadSettings()
+  const settings = options.settings ?? loadSettings()
+  const tope = options.maxRepeticiones ?? Infinity
 
   // 1. Todos los huecos, con desviacion aplicada.
   const slots: { accountId: string; at: Date }[] = []
@@ -96,10 +110,11 @@ export function planSchedule(
   // 2. Asignacion cronologica, con dos restricciones de distinta dureza.
   const lastUsedAt = new Map<string, number>()
   const lastUsedByAccount = new Map<string, number>()
-  const useCount = new Map<string, number>(clipIds.map((id) => [id, 0]))
+  const useCount = new Map<string, number>(clipIds.map((id) => [id, options.usosPrevios?.get(id) ?? 0]))
   const planned: PlannedSlot[] = []
   let globalCollisions = 0
   let accountRepeats = 0
+  let sinClip = 0
 
   for (const slot of slots) {
     const globalCutoff = slot.at.getTime() - settings.clipCooldownMinutes * 60_000
@@ -109,7 +124,7 @@ export function planSchedule(
       (lastUsedByAccount.get(`${slot.accountId}::${id}`) ?? -Infinity) > accountCutoff
 
     // Menos usado primero; a igualdad, el que lleva mas tiempo sin usarse.
-    const ranked = [...clipIds].sort((a, b) => {
+    const ranked = clipIds.filter((id) => (useCount.get(id) ?? 0) < tope).sort((a, b) => {
       const byCount = (useCount.get(a) ?? 0) - (useCount.get(b) ?? 0)
       if (byCount !== 0) return byCount
       return (lastUsedAt.get(a) ?? 0) - (lastUsedAt.get(b) ?? 0)
@@ -134,7 +149,10 @@ export function planSchedule(
       globalCollisions += 1
     }
 
-    if (chosen === undefined) continue
+    if (chosen === undefined) {
+      sinClip += 1
+      continue
+    }
 
     lastUsedAt.set(chosen, slot.at.getTime())
     lastUsedByAccount.set(`${slot.accountId}::${chosen}`, slot.at.getTime())
@@ -156,6 +174,13 @@ export function planSchedule(
       `${accountRepeats} hueco(s) obligaron a que una cuenta repitiera un clip dentro de ` +
         `${settings.accountRepeatHours} h. Es el patron mas visible de todos. Se necesitan al menos ` +
         `tantos clips como publicaciones haga una cuenta en esa ventana.`,
+    )
+  }
+
+  if (sinClip > 0) {
+    log.warn(
+      `${sinClip} hueco(s) quedaron vacios: todos los clips llegaron al tope de ${tope} ` +
+        'publicaciones. Hacen falta mas clips aprobados.',
     )
   }
 

@@ -94,6 +94,13 @@ export interface CuentaAsignada {
    * de mas se lleva su parte del reparto y luego falla entrega por entrega.
    */
   activa: boolean
+  /* Fase 7: lo que enseña la lista agrupada por cliente. */
+  alias: string
+  limiteDiario: number | null
+  ultimoResultado: 'ok' | 'error' | null
+  ultimoResultadoEn: string | null
+  ultimoError: string | null
+  plataformas: string[]
 }
 
 /** Un VOD con a que campaña pertenece. */
@@ -392,6 +399,8 @@ export function crearProyectos(db: Db, ownerId: string): Proyectos {
       const [cuentas, vods] = await Promise.all([
         db.query(
           `select a.id, a.label, a.cliente_id, a.status,
+                  a.alias, a.limite_diario, a.ultimo_resultado, a.ultimo_resultado_en,
+                  a.ultimo_error, a.plataformas,
                   coalesce(t.username, '') as tiktok
              from accounts a
              left join tiktok_tokens t
@@ -413,6 +422,13 @@ export function crearProyectos(db: Db, ownerId: string): Proyectos {
           clienteId: (r.cliente_id as string | null) ?? null,
           tiktok: r.tiktok as string,
           activa: r.status === 'active',
+          alias: (r.alias as string | null) ?? '',
+          limiteDiario: r.limite_diario === null ? null : Number(r.limite_diario),
+          ultimoResultado: (r.ultimo_resultado as 'ok' | 'error' | null) ?? null,
+          ultimoResultadoEn:
+            r.ultimo_resultado_en === null ? null : new Date(r.ultimo_resultado_en as string).toISOString(),
+          ultimoError: (r.ultimo_error as string | null) ?? null,
+          plataformas: Array.isArray(r.plataformas) ? (r.plataformas as string[]) : ['tiktok'],
         })),
         vods: vods.map((r) => ({
           sourceId: r.id as string,

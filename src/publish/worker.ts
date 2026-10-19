@@ -47,6 +47,12 @@ const CORTE_SEGUIDOS = 3
  */
 export interface EstadoWorker {
   /**
+   * Lo ultimo que paso al publicar en una cuenta (Fase 7): sale en la lista
+   * de cuentas y alimenta las alertas. Opcional: el almacen de ficheros no lo
+   * guarda.
+   */
+  resultado?: (accountId: string, ok: boolean, error?: string) => Promise<void>
+  /**
    * Lo que toca publicar ya.
    *
    * Tambien se inyecta, y no es un detalle: leer la cola de los ficheros y
@@ -154,6 +160,7 @@ interface WriteSet {
     status: AccountStatus,
     token?: Account['tokenStatus'],
   ) => Promise<void>
+  resultado: (accountId: string, ok: boolean, error?: string) => Promise<void>
 }
 
 export interface WorkerOptions {
@@ -288,6 +295,9 @@ export async function runWorker(options: WorkerOptions): Promise<WorkerReport> {
     },
     accountStatus: async (accountId, status, token) => {
       if (persist) await estado.accountStatus(accountId, status, token)
+    },
+    resultado: async (accountId, ok, error) => {
+      if (persist) await estado.resultado?.(accountId, ok, error)
     },
   }
 
@@ -477,6 +487,7 @@ export async function runWorker(options: WorkerOptions): Promise<WorkerReport> {
         publishedAt: publishedAt.toISOString(),
       })
       await write.published(item.accountId, publishedAt)
+      await write.resultado(item.accountId, true)
       authFailures.delete(item.accountId)
       report.published += 1
       corte.seguidos = 0
@@ -554,6 +565,7 @@ async function handleFailure(
         report.pausedAccounts.push(item.accountId)
         log.error(`${item.accountId}: pausada tras ${count} fallos de autenticacion`)
       }
+      await write.resultado(item.accountId, false, result.message)
       report.failed += 1
       return
     }
@@ -568,6 +580,7 @@ async function handleFailure(
         lastError: result.message,
       })
       log.error(`${item.accountId}/${item.clipId}: fallo definitivo, ${result.message}`)
+      await write.resultado(item.accountId, false, result.message)
       report.failed += 1
       return
     }
@@ -580,6 +593,7 @@ async function handleFailure(
           lastError: `Agotados ${MAX_ATTEMPTS} intentos: ${result.message}`,
         })
         log.error(`${item.accountId}: agotados los reintentos`)
+        await write.resultado(item.accountId, false, result.message)
         report.failed += 1
         return
       }

@@ -10,6 +10,7 @@ import { loadEnv, paths } from '../src/lib/env.js'
 import { readJson, workDir } from '../src/lib/fsx.js'
 import { planSchedule, summarize } from '../src/queue/schedule.js'
 import { flowMath, loadSettingsDb } from '../src/queue/settings.js'
+import { destinoDelVideo, franjasDelGrupo, maxRepeticiones, usosPrevios } from '../src/queue/reparto.js'
 import { type QueueItem } from '../src/store/store.js'
 /*
  * Postgres y no los ficheros de state/.
@@ -98,13 +99,26 @@ async function main(): Promise<void> {
 
   // Solo las que tienen permiso de TikTok: repartir sobre las demas llena la
   // cola de publicaciones que fallaran una por una.
-  const active = await store.accounts.publicables()
+  const settings = await loadSettingsDb(db, OWNER_ID)
+  const destino = await destinoDelVideo(db, OWNER_ID, sourceId, await store.accounts.publicables(), settings)
+  // Las horas de cada cuenta, con el perfil del cliente y el tope diario.
+  const active = franjasDelGrupo(destino.cuentas, destino.perfil)
   if (active.length === 0) {
-    console.error('No hay cuentas activas.')
+    // La frase va la ultima: es la que enseña el panel en la tarjeta.
+    console.log(
+      destino.cliente === null
+        ? 'No hay cuentas sin cliente que puedan publicar. Asigna el video a una campaña o activa alguna cuenta.'
+        : `El cliente ${destino.cliente.nombre} no tiene cuentas activas. Asígnale cuentas en Cuentas.`,
+    )
     process.exitCode = 1
     await db.close()
     return
   }
+  console.log(
+    `Reparto: ${active.length} cuenta(s)` +
+      (destino.cliente === null ? ' sin cliente' : ` de ${destino.cliente.nombre}`) +
+      `, ${destino.perfil.postsPerDay} al día de ${destino.perfil.dayStartHour} a ${destino.perfil.dayEndHour} h`,
+  )
 
   const baseCaptions = loadBaseCaptions(sourceId)
   const variantsPath = join(paths.out, sourceId, 'variants.json')
@@ -140,7 +154,13 @@ async function main(): Promise<void> {
   const startDate = values.from === undefined ? new Date() : new Date(`${values.from}T00:00:00`)
   startDate.setHours(0, 0, 0, 0)
 
-  const planned = planSchedule(active, clipIds, { startDate, days: Number(values.days) })
+  const planned = planSchedule(active, clipIds, {
+    startDate,
+    days: Number(values.days),
+    settings,
+    maxRepeticiones: await maxRepeticiones(db, OWNER_ID),
+    usosPrevios: usosPrevios(await store.queue.all(), sourceId),
+  })
 
   const accountIds = active.map((a) => a.id)
   const captionsByClip = new Map<string, Map<string, CaptionSet>>()
@@ -215,7 +235,6 @@ async function main(): Promise<void> {
   //
   // El calculo vive en flowMath y no aqui: el panel enseña el mismo numero al
   // tocar los ajustes, y dos formulas separadas acabarian discrepando.
-  const settings = await loadSettingsDb(db, OWNER_ID)
   const math = flowMath(settings)
   const spanMinutes = math.windowHours * 60 * Number(values.days)
   const minutesBetweenSlots = spanMinutes / Math.max(1, planned.length)

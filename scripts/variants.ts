@@ -25,6 +25,8 @@ import { createStore } from '../src/store/pg.js'
 import { OWNER_ID } from '../src/lib/owner.js'
 import { requireEnv } from '../src/lib/env.js'
 import { renderVariant, type VariantResult } from '../src/variants/render.js'
+import { destinoDelVideo } from '../src/queue/reparto.js'
+import { loadSettingsDb } from '../src/queue/settings.js'
 
 async function main(): Promise<void> {
   loadEnv()
@@ -49,10 +51,17 @@ async function main(): Promise<void> {
 
   // Las que pueden publicar, no las meramente activas: ver publicables().
   // Generar variantes para una cuenta sin permiso es tiempo de GPU tirado.
-  const active = await store.accounts.publicables()
+  // Fase 7: solo las del cliente del video (o las sin cliente si no tiene
+  // campaña). Una copia para una cuenta de otro cliente nunca se publicaria.
+  const destino = await destinoDelVideo(db, OWNER_ID, sourceId, await store.accounts.publicables(), await loadSettingsDb(db, OWNER_ID))
+  const active = destino.cuentas
   if (active.length === 0) {
-    console.error('No hay ninguna cuenta que pueda publicar.')
-    console.error('Enlaza al menos una con TikTok en Ajustes, en Cuentas.')
+    console.error('No hay ninguna cuenta que pueda publicar este video.')
+    console.log(
+      destino.cliente === null
+        ? 'No hay cuentas sin cliente que puedan publicar. Asigna el video a una campaña o activa alguna cuenta.'
+        : `El cliente ${destino.cliente.nombre} no tiene cuentas activas. Asígnale cuentas en Cuentas.`,
+    )
     process.exitCode = 1
     await db.close()
     return

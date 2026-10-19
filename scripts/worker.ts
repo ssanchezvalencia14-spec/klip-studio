@@ -23,6 +23,15 @@ import { OWNER_ID as OWNER } from '../src/lib/owner.js'
 import { connect } from '../src/store/db.js'
 import { publicarResultado } from '../src/store/publicar.js'
 import { createCola, type Job } from '../src/jobs/cola.js'
+import {
+  createEstadoIA,
+  iaPausada,
+  KINDS_DE_IA,
+  leerMarca,
+  MARCA_ESPERA_IA,
+  MARCA_ESTADO_IA,
+  SALIDA_ESPERA_IA,
+} from '../src/llm/estado.js'
 
 loadEnv()
 
@@ -40,6 +49,7 @@ const YO = `${hostname()}-${process.pid}`
 
 const db = await connect(requireEnv('DATABASE_URL'))
 const cola = createCola(db, OWNER)
+const estadoIA = createEstadoIA(db, OWNER)
 
 let parando = false
 let actual: ChildProcess | null = null
@@ -52,10 +62,14 @@ let actual: ChildProcess | null = null
  * y que si este ordenador se apaga, la tarea se detecte perdida y vuelva a la
  * cola en vez de quedarse en marcha para siempre.
  */
-async function ejecutar(job: Job): Promise<'ok' | 'error' | 'cancelled'> {
+async function ejecutar(job: Job): Promise<'ok' | 'error' | 'cancelled' | 'en_espera_ia'> {
   log.info(`${job.kind} ${job.args.join(' ')} (${job.id})`)
 
   const lineas: string[] = []
+  // Las marcas de estado de la IA van aparte: son para este proceso, no para
+  // la pantalla. Una linea de JSON como ultima linea de la tarjeta no le dice
+  // nada a nadie.
+  const marcas: string[] = []
   let ultima = ''
   let cancelada = false
 
@@ -70,6 +84,10 @@ async function ejecutar(job: Job): Promise<'ok' | 'error' | 'cancelled'> {
     for (const linea of chunk.toString('utf8').split('\n')) {
       const limpia = linea.replace(/\r/g, '').trimEnd()
       if (limpia === '') continue
+      if (limpia.includes(MARCA_ESPERA_IA) || limpia.includes(MARCA_ESTADO_IA)) {
+        marcas.push(limpia)
+        continue
+      }
       lineas.push(limpia)
       ultima = limpia
     }
@@ -100,6 +118,28 @@ async function ejecutar(job: Job): Promise<'ok' | 'error' | 'cancelled'> {
 
   clearInterval(latido)
   actual = null
+
+  /*
+   * Lo que la tarea dijo de la IA.
+   *
+   * Si no pudo preguntar (sin sesion, limite, sin CLI) la tarea NO falla:
+   * queda en `en_espera_ia` y la cola de IA se pausa hasta la hora de vuelta o
+   * hasta que alguien pulse "Reintentar". Reintentar ahora daria lo mismo.
+   */
+  const leida = leerMarca(marcas)
+  if (leida !== null) {
+    try {
+      await estadoIA.guardar(leida.marca)
+    } catch (error) {
+      log.error('No se pudo guardar el estado de la IA', error)
+    }
+  }
+
+  if (!cancelada && codigo === SALIDA_ESPERA_IA && leida?.espera === true) {
+    await cola.terminar(job.id, 'en_espera_ia', codigo, lineas)
+    log.warn(`${job.id} -> en espera de la IA (${leida.marca.estado}). Se pausan las tareas de IA.`)
+    return 'en_espera_ia'
+  }
 
   const estado = cancelada ? 'cancelled' : codigo === 0 ? 'ok' : 'error'
   await cola.terminar(job.id, estado, codigo, lineas)
@@ -183,7 +223,16 @@ while (!parando) {
     if (devueltas > 0) log.warn(`${devueltas} tarea(s) perdidas devueltas a la cola`)
     if (rendidas > 0) log.error(`${rendidas} tarea(s) descartadas tras varios intentos`)
 
-    const job = await cola.coger(YO)
+    /*
+     * La IA: si la hora de vuelta ya paso, lo que esperaba vuelve a la cola.
+     * Si sigue en pausa, las tareas de IA se saltan y el resto sigue: un
+     * limite de uso no tiene por que parar un render.
+     */
+    const reanudadas = await estadoIA.reanudar()
+    if (reanudadas > 0) log.info(`La IA vuelve a estar disponible: ${reanudadas} tarea(s) de nuevo en la cola.`)
+    const pausada = iaPausada(await estadoIA.leer())
+
+    const job = await cola.coger(YO, pausada ? KINDS_DE_IA : [])
     if (job === null) {
       // Se avisa de vez en cuando, no en cada vuelta: con 5 segundos de
       // intervalo serian 720 lineas por hora sin decir nada nuevo.

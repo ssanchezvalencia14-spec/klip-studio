@@ -13,6 +13,7 @@ import { readJson, workDir } from '../src/lib/fsx.js'
 import { formatDuration } from '../src/lib/logger.js'
 import { beginRun } from '../src/store/runs.js'
 import { selectClips } from '../src/select/select.js'
+import { MARCA_ESPERA_IA, MARCA_ESTADO_IA, SALIDA_ESPERA_IA } from '../src/llm/estado.js'
 import type { SourceMeta, Transcript } from '../src/types.js'
 
 function formatTimestamp(seconds: number): string {
@@ -91,7 +92,15 @@ async function main(): Promise<void> {
       minutos: Math.round(transcript.durationSec / 60),
       ventanas: result.windows,
     },
-    output: { clips: result.clips.length },
+    // Registro de uso: tiempo, proveedor y modelo por tarea. Con la
+    // suscripcion el coste queda a 0 y el panel lo enseña como incluido.
+    output: {
+      clips: result.clips.length,
+      proveedor: result.proveedor,
+      modelo: result.modelo,
+      llamadas: result.llamadas,
+      coste: result.incluidoEnSuscripcion ? 'Incluido en la suscripción' : 'API',
+    },
     tokens: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
     costUsd: result.usage.estimatedUsd ?? 0,
   })
@@ -106,11 +115,14 @@ async function main(): Promise<void> {
     `Tokens    : ${result.usage.inputTokens.toLocaleString()} entrada / ` +
       `${result.usage.outputTokens.toLocaleString()} salida`,
   )
+  console.log(`IA        : ${result.proveedor} (${result.modelo}), ${result.llamadas} llamada(s)`)
   console.log(
     `Coste est.: ${
-      result.usage.estimatedUsd === null
-        ? 'modelo sin precio en la tabla'
-        : `$${result.usage.estimatedUsd.toFixed(4)}`
+      result.incluidoEnSuscripcion
+        ? 'Incluido en la suscripción'
+        : result.usage.estimatedUsd === null
+          ? 'modelo sin precio en la tabla'
+          : `$${result.usage.estimatedUsd.toFixed(4)}`
     }`,
   )
   console.log(`Tiempo    : ${formatDuration(result.elapsedMs)}`)
@@ -137,6 +149,34 @@ async function main(): Promise<void> {
    */
   const noSePudoPreguntar =
     result.motivoCorte !== undefined || (result.fallidas === result.windows && result.windows > 0)
+
+  /*
+   * La IA no esta disponible (sin sesion, limite de uso, CLI ausente): la tarea
+   * NO falla, espera. Se avisa al trabajador con una linea marcada y un codigo
+   * de salida propio (75, "temporal"), y es el quien la deja en `en_espera_ia`
+   * y pausa la cola de IA. Reintentar ahora solo daria el mismo aviso.
+   */
+  const espera = result.motivoCorte?.esperaIA
+  if (espera !== undefined) {
+    // La marca primero y la frase al final: la ultima linea es la que el
+    // panel enseña en la tarjeta. El trabajador no muestra la marca.
+    console.log(`${MARCA_ESPERA_IA} ${JSON.stringify({
+      ...espera,
+      mensaje: result.motivoCorte?.mensaje,
+      proveedor: result.proveedor,
+      modelo: result.modelo,
+    })}`)
+    console.log(result.motivoCorte?.mensaje ?? '')
+    process.exitCode = SALIDA_ESPERA_IA
+    return
+  }
+
+  // Si respondio la suscripcion, la IA esta lista: el panel lo dice sin
+  // tener que pulsar "Probar IA".
+  if (result.incluidoEnSuscripcion && result.llamadas > 0) {
+    console.log(`${MARCA_ESTADO_IA} ${JSON.stringify({ estado: 'lista', proveedor: result.proveedor, modelo: result.modelo })}`)
+  }
+
   if (noSePudoPreguntar) {
     console.error('')
     /*

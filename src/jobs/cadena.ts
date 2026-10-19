@@ -157,6 +157,18 @@ export function arrancarCadena(cola: Cola, alEncolar?: () => void): () => void {
       const siguiente = siguientePaso(job)
       if (siguiente === null) continue
 
+      /*
+       * Cada panel encendido corre su propio encadenado (Hostinger, el local,
+       * la vista previa) y cada uno recuerda en memoria lo que ya encadeno.
+       * Sin esta comprobacion en la base, dos paneles encolaban el mismo paso
+       * dos veces: una de las causas de las ejecuciones repetidas de "Elegir
+       * momentos". `en_espera_ia` tambien cuenta: ese paso ya esta pedido.
+       */
+      if (await cola.hayActiva([siguiente.kind], siguiente.sourceId)) {
+        log.info(`${siguiente.kind} de ${siguiente.sourceId} ya esta en la cola. No se repite.`)
+        continue
+      }
+
       log.info(`${job.kind} termino, sigue ${siguiente.kind} de ${siguiente.sourceId}`)
       await cola.encolar(
         siguiente.kind,

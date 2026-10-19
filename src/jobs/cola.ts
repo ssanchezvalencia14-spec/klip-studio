@@ -26,12 +26,13 @@ import type { Db } from '../store/db.js'
  */
 export const JOB_KINDS = [
   'doctor', 'ingest', 'select', 'momentos', 'render', 'subir',
-  'accounts', 'variants', 'schedule', 'publish', 'metrics',
+  'accounts', 'variants', 'schedule', 'publish', 'metrics', 'probar-ia',
 ] as const
 
 export type JobKind = (typeof JOB_KINDS)[number]
 
-export type JobStatus = 'queued' | 'running' | 'ok' | 'error' | 'cancelled'
+/** `en_espera_ia`: no fallo, espera a que la IA vuelva (sin sesion o con limite). */
+export type JobStatus = 'queued' | 'running' | 'ok' | 'error' | 'cancelled' | 'en_espera_ia'
 
 export interface Job {
   id: string
@@ -101,7 +102,9 @@ export function createCola(db: Db, ownerId: string) {
      * se libere, la salta y mira la siguiente. Sin eso, dos PCs encendidos
      * renderizarian el mismo video a la vez.
      */
-    async coger(trabajador: string): Promise<Job | null> {
+    async coger(trabajador: string, saltar: readonly string[] = []): Promise<Job | null> {
+      // `saltar`: tipos que no se cogen ahora (los de IA mientras esta en
+      // pausa). Se quedan en la cola, en su orden, para cuando vuelva.
       const filas = await db.query(
         `update jobs set
            status = 'running',
@@ -112,12 +115,13 @@ export function createCola(db: Db, ownerId: string) {
          where id = (
            select id from jobs
            where owner_id = $1 and status = 'queued'
+             and not (kind = any($3::text[]))
            order by created_at
            limit 1
            for update skip locked
          )
          returning *`,
-        [ownerId, trabajador],
+        [ownerId, trabajador, [...saltar]],
       )
       return filas[0] === undefined ? null : aJob(filas[0] as Record<string, unknown>)
     },
@@ -185,7 +189,7 @@ export function createCola(db: Db, ownerId: string) {
      */
     async terminar(
       id: string,
-      status: 'ok' | 'error' | 'cancelled',
+      status: 'ok' | 'error' | 'cancelled' | 'en_espera_ia',
       exitCode: number | null,
       log: string[],
     ): Promise<void> {
@@ -269,7 +273,7 @@ export function createCola(db: Db, ownerId: string) {
     async hayActiva(kinds: readonly JobKind[], sourceId: string): Promise<boolean> {
       const filas = await db.query(
         `select 1 from jobs
-          where owner_id = $1 and kind = any($2) and status in ('queued', 'running')
+          where owner_id = $1 and kind = any($2) and status in ('queued', 'running', 'en_espera_ia')
             and args[1] = $3
           limit 1`,
         [ownerId, [...kinds], sourceId],

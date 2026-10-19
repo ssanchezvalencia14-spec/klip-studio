@@ -434,7 +434,11 @@ async function cargarMetricas() {
 async function refrescar() {
   if (state.view === 'proceso' || state.view === 'videos') await cargarProceso();
   if (state.view === 'clips') await cargarClips();
-  if (state.view === 'cola') state.queue = await api('/api/queue');
+  if (state.view === 'cola') {
+    const [cola, overview] = await Promise.all([api('/api/queue'), api('/api/overview')]);
+    state.queue = cola;
+    state.overview = overview;
+  }
   if (state.view === 'registro') state.runs = await api('/api/runs');
   if (state.view === 'ia') {
     // Las tareas tambien: "Probar IA" es una tarea y hay que ver si sigue en marcha.
@@ -468,7 +472,11 @@ async function refrescar() {
     state.proyectos = pr;
     state.settings = se;
   }
-  if (state.view === 'metricas') await cargarMetricas();
+  if (state.view === 'metricas') {
+    // Tambien el estado general: el vacio depende de si hay cuentas que publican.
+    const [, overview] = await Promise.all([cargarMetricas(), api('/api/overview')]);
+    state.overview = overview;
+  }
   /*
    * El detalle se pide cada vez que se entra, no se cachea.
    *
@@ -1850,6 +1858,62 @@ function horaDe(iso) {
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
+/** Tres cifras arriba del calendario. */
+function pintarResumenAgenda(q) {
+  const o = state.overview;
+  const proximas = q.proximas ?? [];
+  const semana = Date.now() + 7 * 86400000;
+  const estaSemana = proximas.filter(p => new Date(p.scheduledAt).getTime() <= semana).length;
+  const cuentas = new Set(proximas.map(p => p.accountId)).size;
+  const aprobados = o ? o.clips.approved : null;
+  const recomendados = o && o.target ? o.target : null;
+  const tarjeta = (icono, cifra, nombre, nota, clase) =>
+    '<div class="resumen-tarjeta' + (clase ? ' ' + clase : '') + '">' + ico(icono) +
+      '<b class="dato">' + cifra + '</b><span class="resumen-nombre">' + nombre + '</span>' +
+      (nota ? '<span class="resumen-nota">' + nota + '</span>' : '') + '</div>';
+  return '<div class="resumen-agenda cascada">' +
+    tarjeta('agenda', estaSemana, 'Salidas esta semana', q.vencidas > 0 ? q.vencidas + ' esperando turno' : '') +
+    tarjeta('aprobado', aprobados === null ? '–' : aprobados, 'Clips aprobados',
+      recomendados === null ? '' : 'Se recomiendan ' + recomendados + ' al día',
+      recomendados !== null && aprobados !== null && aprobados < recomendados ? 'pide' : '') +
+    tarjeta('cuentas', cuentas, cuentas === 1 ? 'Cuenta que publica' : 'Cuentas que publican', '') +
+  '</div>';
+}
+
+/*
+ * La semana en columnas: hoy y los seis dias siguientes.
+ *
+ * Cada salida es un chip con hora, cuenta y clip. En el movil las columnas se
+ * apilan y se lee como una lista por dias.
+ */
+function pintarSemana(proximas, q) {
+  const dias = [];
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 7; i += 1) dias.push(new Date(hoy.getTime() + i * 86400000));
+  const mismoDia = (a, b) => a.toDateString() === b.toDateString();
+  const columnas = dias.map((d, i) => {
+    const suyas = proximas.filter(p => mismoDia(new Date(p.scheduledAt), d));
+    const nombre = i === 0 ? 'Hoy' : i === 1 ? 'Mañana' : d.toLocaleDateString('es', { weekday: 'long' });
+    return '<section class="dia' + (i === 0 ? ' hoy' : '') + '" aria-label="' + esc(nombre) + '">' +
+      '<header class="dia-cab"><span class="dia-nombre">' + esc(nombre) + '</span>' +
+        '<span class="dia-fecha dato">' + d.getDate() + '/' + (d.getMonth() + 1) + '</span></header>' +
+      (suyas.length === 0
+        ? '<p class="dia-vacio">Sin salidas</p>'
+        : suyas.map(p =>
+            '<div class="salida' + (p.vencida ? ' vencida' : '') + '">' +
+              '<span class="salida-hora dato">' + horaDe(p.scheduledAt) + '</span>' +
+              '<span class="salida-cuenta">' + esc(p.accountId) + '</span>' +
+              '<span class="salida-clip">' + esc(p.caption || p.title) + '</span>' +
+            '</div>').join('')) +
+    '</section>';
+  }).join('');
+  const despues = proximas.filter(p => new Date(p.scheduledAt).getTime() >= hoy.getTime() + 7 * 86400000).length +
+    (q.masAlla ?? 0);
+  return '<div class="semana">' + columnas + '</div>' +
+    (despues > 0 ? '<p class="reason" style="margin:var(--s3) 0 0">Y ' + despues + ' más después de esta semana.</p>' : '');
+}
+
 function vistaCola() {
   const q = state.queue;
   if (!q) return esqueleto(2, false);
@@ -1857,12 +1921,14 @@ function vistaCola() {
   if (q.total === 0) {
     // Ya no se manda a pulsar nada: ese boton dejo de existir cuando el reparto
     // paso a hacerse solo al terminar de revisar un video.
-    return '<div class="empty"><b>Nada programado</b>' +
-      'Aprueba los videos de alguno en Revisar. Al terminarlo, se reparten solos ' +
-      'entre las cuentas y aparecen aqui con su fecha.</div>';
+    return pintarResumenAgenda(q) +
+      '<div class="empty"><b>Todavía no hay salidas programadas</b>' +
+      'Aprueba clips en Revisar: al terminar un video se reparten solos entre las cuentas y aparecen aquí.' +
+      '<div class="actions" style="justify-content:center;margin-top:var(--s4)">' +
+        '<button class="act go" data-ir="clips">' + ico('revisar') + 'Aprobar clips</button></div></div>';
   }
 
-  let html = '';
+  let html = pintarResumenAgenda(q);
   const proximas = q.proximas ?? [];
 
   if (proximas.length === 0) {
@@ -1895,30 +1961,10 @@ function vistaCola() {
 
     // Agrupado por dia: cuarenta horas seguidas no dejan ver donde acaba hoy y
     // empieza manana, que es justo lo que se viene a mirar.
-    let dia = null;
-    html += '<article class="card"><div class="body">';
-    for (const p of proximas) {
-      const suyo = diaDe(p.scheduledAt);
-      if (suyo !== dia) {
-        dia = suyo;
-        html += '<p class="reason" style="margin:var(--s4) 0 var(--s2);text-transform:capitalize">' +
-          esc(dia) + '</p>';
-      }
-      html += '<div class="fila-hora' + (p.vencida ? ' vencida' : '') + '">' +
-        '<span class="hora">' + horaDe(p.scheduledAt) + '</span>' +
-        '<span class="quien">' + esc(p.accountId) + '</span>' +
-        '<span class="que">' + esc(p.caption || p.title) + '</span>' +
-        (p.vencida ? '<span class="badge bad">sin salir</span>' : '') +
-      '</div>';
-    }
-    if (q.masAlla > 0) {
-      html += '<p class="reason" style="margin:var(--s4) 0 0">Y ' + q.masAlla +
-        ' mas despues. Aqui se listan las ' + proximas.length + ' primeras.</p>';
-    }
-    html += '</div></article>';
+    html += pintarSemana(proximas, q);
   }
 
-  html += seccion('&#9679;', 'Salud de la cola', 'Si lo programado esta saliendo al ritmo previsto.') +
+  html += seccion('&#9679;', 'Salud de la cola', 'Si lo programado está saliendo al ritmo previsto.') +
     '<article class="card flat"><div class="body">' +
       '<details class="nota"><summary>Que mide esto</summary>' +
         '<p>Cuantas veces se repite cada video entre las cuentas. Repetir mucho cansa ' +
@@ -3128,16 +3174,43 @@ function vistaProyectos() {
 
 // --- Vista: cuentas -------------------------------------------------------
 
+/*
+ * Cuantas cuentas publican frente a las que paga el plan.
+ *
+ * El tope sale de la configuracion (Horarios, plan del proveedor), nunca de un
+ * numero escrito aqui: con pocas cuentas no tiene que parecer que faltan.
+ */
+function medidorCuentas() {
+  const d = state.proyectos;
+  const tope = state.settings?.settings?.maxCuentas;
+  if (!d) return '';
+  const total = d.cuentas.length;
+  const activas = d.cuentas.filter(c => c.activa).length;
+  const conTope = Number.isFinite(tope) && tope > 0;
+  const pct = conTope ? Math.min(100, Math.round((activas / tope) * 100)) : 100;
+  return '<article class="card medidor"><div class="body">' +
+    '<div class="medidor-cab">' +
+      '<span><b class="dato">' + activas + '</b>' + (conTope ? ' de <span class="dato">' + tope + '</span>' : '') +
+        (activas === 1 ? ' cuenta publica' : ' cuentas publican') + '</span>' +
+      (total > activas ? '<span class="reason" style="margin:0">' + plural(total - activas, 'cuenta pausada', 'cuentas pausadas') + '</span>' : '') +
+    '</div>' +
+    '<span class="medidor-barra" role="img" aria-label="' + activas + (conTope ? ' de ' + tope : '') + ' cuentas"><i style="width:' + pct + '%"></i></span>' +
+    (conTope && tope - total > 0
+      ? '<p class="reason" style="margin:var(--s2) 0 0">Tu plan admite ' + plural(tope - total, 'cuenta más', 'cuentas más') + '.</p>'
+      : '') +
+  '</div></article>';
+}
+
 function vistaPlataformas() {
   const d = state.plataformas;
   if (!d) return esqueleto(3, false);
 
   const punto = { conectado: 'si', 'sin-conectar': 'no', 'no-disponible': 'nada' };
-  const etiqueta = { conectado: 'conectado', 'sin-conectar': 'sin conectar', 'no-disponible': 'aun no se puede' };
+  const etiqueta = { conectado: 'Conectado', 'sin-conectar': 'Sin conectar', 'no-disponible': 'Próximamente' };
   const clase = { conectado: 'ok', 'sin-conectar': '', 'no-disponible': '' };
 
-  return d.plataformas.map(p =>
-    '<article class="card"><div class="body">' +
+  return medidorCuentas() + '<div class="plataformas-fila cascada">' + d.plataformas.map(p =>
+    '<article class="card plataforma ' + p.estado + '"><div class="body">' +
       '<div class="plat">' +
         '<span class="punto-estado ' + punto[p.estado] + '"></span>' +
         '<span class="nombre">' + esc(p.nombre) + '</span>' +
@@ -3155,7 +3228,7 @@ function vistaPlataformas() {
       (p.nota ? '<p class="reason" style="margin:var(--s3) 0 0">' + esc(p.nota) + '</p>' : '') +
 
     '</div></article>'
-  ).join('') + listaCuentas() +
+  ).join('') + '</div>' + listaCuentas() +
 
   '<article class="card flat"><div class="body">' +
     '<details class="nota"><summary>Que pasa al enlazar una cuenta</summary>' +
@@ -3310,9 +3383,12 @@ function vistaMetricas() {
 
   if (m.published === 0) {
     return '<div class="card"><div class="body">' +
-      '<p class="hook">Todavia no hay nada publicado</p>' +
-      '<p class="reason" style="margin-bottom:0">Esto se llena cuando el programa empiece a subir videos. ' +
-      'Enlaza una cuenta en la seccion Cuentas para empezar.</p>' +
+      '<p class="hook">Aún no se ha publicado nada</p>' +
+      '<p class="reason" style="margin-bottom:0">' +
+        ((state.overview?.accounts ?? 0) > 0
+          ? 'Esto se llena cuando salgan los primeros clips de la agenda.'
+          : 'Esto se llena cuando salgan los primeros clips. Primero enlaza una cuenta en Cuentas.') +
+      '</p>' +
     '</div></div>' +
     '<div class="card"><div class="body">' +
       '<div class="chips">' +

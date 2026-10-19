@@ -2436,4 +2436,61 @@ export const CSS = `  :root {
     .decidir .act.approve { flex: 1.4; }
     .decidir .act.reject { flex: 1; }
   }
+
+  /* =====================================================================
+   * Fase 3: Agenda.
+   * ===================================================================== */
+  .resumen-agenda { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); margin-bottom: var(--s4); }
+  .resumen-tarjeta {
+    display: grid; grid-template-columns: auto 1fr; grid-template-areas: "ico ico" "num num" "nombre nombre" "nota nota";
+    gap: 2px; padding: var(--s4); border-radius: var(--r-tarjeta); background: var(--panel); border: 1px solid var(--line);
+  }
+  .resumen-tarjeta .ico-svg { grid-area: ico; color: var(--dim); margin-bottom: 6px; }
+  .resumen-tarjeta b { grid-area: num; font-family: var(--fuente-titulo); font-size: 30px; font-weight: 650; line-height: 1.1; }
+  .resumen-nombre { grid-area: nombre; font-weight: 600; }
+  .resumen-nota { grid-area: nota; font-size: var(--t-meta); color: var(--faint); }
+  .resumen-tarjeta.pide { background: var(--aviso-fondo); border-color: var(--aviso-borde); }
+  .resumen-tarjeta.pide .resumen-nota { color: var(--aviso-texto); }
+
+  .semana { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--s2); }
+  .dia { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-tarjeta); padding: var(--s3);
+    display: flex; flex-direction: column; gap: 6px; min-height: 160px; }
+  .dia.hoy { border-color: var(--destacada-borde); background: var(--destacada); }
+  .dia-cab { display: flex; justify-content: space-between; align-items: baseline; position: static; background: none;
+    border: 0; padding: 0 0 4px; backdrop-filter: none; }
+  .dia-nombre { font-weight: 600; text-transform: capitalize; font-size: var(--t-meta); }
+  .dia.hoy .dia-nombre { color: var(--indigo-texto); }
+  .dia-fecha { font-size: 11px; color: var(--faint); }
+  .dia-vacio { margin: 0; font-size: 12px; color: var(--faint); }
+  .salida { display: flex; flex-direction: column; gap: 1px; padding: 7px 8px; border-radius: 10px;
+    background: var(--raised); border: 1px solid var(--line); }
+  .salida.vencida { border-color: var(--aviso-borde); background: var(--aviso-fondo); }
+  .salida-hora { font-size: 12px; color: var(--azul-texto); font-weight: 500; }
+  .salida.vencida .salida-hora { color: var(--aviso-texto); }
+  .salida-cuenta { font-size: 11.5px; color: var(--dim); }
+  .salida-clip { font-size: 12px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
+
+  @media (max-width: 1099px) {
+    .semana { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .resumen-agenda { grid-template-columns: 1fr; }
+    .semana { grid-template-columns: 1fr; }
+    .dia { min-height: 0; }
+  }
+
+  /* =====================================================================
+   * Fase 3: Cuentas.
+   * ===================================================================== */
+  .plataformas-fila { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); margin-bottom: var(--s4); }
+  .plataforma.conectado { border-color: var(--ok-borde); }
+  .plataforma.no-disponible { opacity: .8; }
+  .plataforma .badge { margin-left: auto; }
+  .medidor { margin-bottom: var(--s4); }
+  .medidor-cab { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); margin-bottom: var(--s2); }
+  .medidor-cab b { font-family: var(--fuente-titulo); font-size: 22px; }
+  .medidor-barra { display: block; height: 8px; border-radius: var(--r-pildora); background: var(--raised); overflow: hidden; }
+  .medidor-barra i { display: block; height: 100%; border-radius: inherit; background: var(--ok-texto); }
+  @media (max-width: 760px) { .plataformas-fila { grid-template-columns: 1fr; } }
 `

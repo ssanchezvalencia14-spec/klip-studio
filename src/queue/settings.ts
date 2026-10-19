@@ -43,6 +43,11 @@ export interface FlowSettings {
    * que falla al publicar porque no existe al otro lado.
    */
   maxCuentas: number
+  /**
+   * Fase 7: cuantas veces como mucho se publica el mismo clip, sumando todas
+   * las cuentas. Ver docs/RIESGOS.md.
+   */
+  maxRepeticiones: number
 }
 
 export const DEFAULTS: FlowSettings = {
@@ -54,6 +59,7 @@ export const DEFAULTS: FlowSettings = {
   clipCooldownMinutes: 90,
   accountRepeatHours: 72,
   maxCuentas: 25,
+  maxRepeticiones: 10,
 }
 
 const FILE = join(ROOT, 'state', 'settings.json')
@@ -82,6 +88,7 @@ const LIMITS: Partial<Record<keyof FlowSettings, [number, number]>> = {
   // dedazo. Lo que de verdad limita son el plan del proveedor y la
   // concurrencia del trabajador.
   maxCuentas: [1, 1000],
+  maxRepeticiones: [1, 100],
 }
 
 export class InvalidSettings extends Error {}
@@ -157,6 +164,7 @@ const COLUMNAS: Record<keyof FlowSettings, string> = {
   clipCooldownMinutes: 'clip_cooldown_minutes',
   accountRepeatHours: 'account_repeat_hours',
   maxCuentas: 'max_cuentas',
+  maxRepeticiones: 'max_repeticiones',
 }
 
 export async function loadSettingsDb(db: DbLike, ownerId: string): Promise<FlowSettings> {

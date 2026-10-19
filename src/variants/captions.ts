@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import * as z from 'zod/v4'
 import { optionalEnv } from '../lib/env.js'
 import { createLogger } from '../lib/logger.js'
+import { crearProveedorLlm, nombreProveedor, type ProveedorLlm } from '../llm/provider.js'
 
 const log = createLogger('captions')
 
@@ -104,11 +105,14 @@ export class ModelCaptionVarier implements CaptionVarier {
 export class HashtagOnlyVarier implements CaptionVarier {
   readonly name = 'solo-hashtags'
 
+  /** `callado`: cuando lo usa PlantillaVarier, que si cambia el texto. */
+  constructor(private readonly callado = false) {}
+
   /** El aviso se emite una vez, no una por clip: repetirlo solo tapa el log. */
   private warned = false
 
   vary(base: CaptionSet, accountIds: string[]): Promise<Map<string, CaptionSet>> {
-    if (!this.warned) {
+    if (!this.warned && !this.callado) {
       this.warned = true
       log.warn(
         'Variacion de textos degradada: los captions seran IDENTICOS en todas las cuentas. ' +
@@ -135,11 +139,110 @@ export class HashtagOnlyVarier implements CaptionVarier {
   }
 }
 
+const SISTEMA_VARIACION =
+  'Escribes captions para TikTok. Te dan un caption base y debes producir N ' +
+  'reescrituras distintas para publicar el MISMO video en N cuentas.\n\n' +
+  'Cada reescritura debe atacar el video desde un angulo diferente: una puede ' +
+  'ser una pregunta, otra una cita textual, otra una afirmacion tajante, otra ' +
+  'apelar a la incredulidad. NO rotes sinonimos sobre la misma frase: dos ' +
+  'captions que comparten estructura se agrupan trivialmente y delatan la red.\n\n' +
+  'Mantén el idioma del original. Maximo 150 caracteres. Sin emojis de relleno. ' +
+  'No destripes el remate del video.\n\n' +
+  'Responde SOLO con JSON, sin texto alrededor: ' +
+  '{"variants":[{"caption":"...","hashtags":["a","b","c"]}]} ' +
+  '(hashtags sin almohadilla, entre 3 y 5).'
+
+/** El primer objeto JSON del texto: el modelo a veces lo envuelve en ```json. */
+export function extraerJson(texto: string): unknown {
+  const ini = texto.indexOf('{')
+  const fin = texto.lastIndexOf('}')
+  if (ini < 0 || fin <= ini) throw new Error('La respuesta no trae JSON.')
+  return JSON.parse(texto.slice(ini, fin + 1))
+}
+
+/**
+ * Variacion con la SUSCRIPCION (Fase 7), por claude -p.
+ *
+ * Desde la Fase 1 la IA va por la suscripcion y no por la API, pero esta
+ * parte seguia pidiendo ANTHROPIC_API_KEY: sin ella caia a variar solo los
+ * hashtags, y el texto salia identico en todas las cuentas.
+ */
+export class SubscriptionCaptionVarier implements CaptionVarier {
+  readonly name = 'suscripcion'
+
+  constructor(private readonly llm: ProveedorLlm) {}
+
+  async vary(base: CaptionSet, accountIds: string[]): Promise<Map<string, CaptionSet>> {
+    const { texto } = await this.llm.completar(
+      SISTEMA_VARIACION,
+      `Caption base: ${base.caption}\nHashtags base: ${base.hashtags.join(', ')}\n\n` +
+        `Genera exactamente ${accountIds.length} variantes.`,
+    )
+    const parsed = CaptionVariantsSchema.safeParse(extraerJson(texto))
+    if (!parsed.success) throw new Error('El modelo no devolvio variantes de texto validas.')
+    const result = new Map<string, CaptionSet>()
+    accountIds.forEach((accountId, i) => {
+      const v = parsed.data.variants[i]
+      result.set(
+        accountId,
+        v === undefined
+          ? base
+          : {
+              caption: v.caption.slice(0, 150),
+              hashtags: v.hashtags.map((h) => h.replace(/^#/, '')).filter(Boolean).slice(0, 5),
+            },
+      )
+    })
+    return result
+  }
+}
+
+/**
+ * Alternativa sin modelo que SI cambia el texto (Fase 7).
+ *
+ * Mejor que solo-hashtags, peor que un modelo: cada cuenta recibe el caption
+ * con una estructura distinta (pregunta, aviso, cita...) elegida de forma
+ * estable por cuenta, mas su propio orden y seleccion de hashtags. No engaña
+ * a un clasificador serio, pero ya no hay N textos identicos.
+ */
+export class PlantillaVarier implements CaptionVarier {
+  readonly name = 'plantillas'
+
+  private static readonly FORMAS: ((c: string) => string)[] = [
+    (c) => c,
+    (c) => `${c.replace(/[.!?¡¿]+$/, '')}. Míralo hasta el final.`,
+    (c) => `¿Lo sabías? ${c}`,
+    (c) => `"${c.replace(/[.!?]+$/, '')}"`,
+    (c) => `Esto hay que verlo: ${c.charAt(0).toLowerCase()}${c.slice(1)}`,
+    (c) => `${c.replace(/[.!?]+$/, '')}. ¿Qué opinas?`,
+    (c) => `Atento a esto. ${c}`,
+  ]
+
+  vary(base: CaptionSet, accountIds: string[]): Promise<Map<string, CaptionSet>> {
+    const hashtags = new HashtagOnlyVarier(true)
+    const result = new Map<string, CaptionSet>()
+    return hashtags.vary(base, accountIds).then((tags) => {
+      accountIds.forEach((accountId, i) => {
+        const digest = createHash('sha256').update(`forma::${accountId}`).digest()
+        // Por posicion y no solo por hash: dos cuentas seguidas nunca comparten forma.
+        const forma = PlantillaVarier.FORMAS[(i + digest.readUInt8(0)) % PlantillaVarier.FORMAS.length]!
+        result.set(accountId, {
+          caption: forma(base.caption.trim()).slice(0, 150),
+          hashtags: tags.get(accountId)?.hashtags ?? base.hashtags,
+        })
+      })
+      return result
+    })
+  }
+}
+
 /** Elige la estrategia segun lo que haya configurado. */
 export function createCaptionVarier(): CaptionVarier {
   const apiKey = optionalEnv('ANTHROPIC_API_KEY')
-  if (apiKey === undefined) return new HashtagOnlyVarier()
-
-  const model = optionalEnv('SELECT_MODEL') ?? 'claude-opus-5-5'
-  return new ModelCaptionVarier(new Anthropic({ apiKey }), model)
+  if (apiKey !== undefined && nombreProveedor() === 'anthropic-api') {
+    const model = optionalEnv('SELECT_MODEL') ?? 'claude-opus-5-5'
+    return new ModelCaptionVarier(new Anthropic({ apiKey }), model)
+  }
+  if (nombreProveedor() === 'claude-cli') return new SubscriptionCaptionVarier(crearProveedorLlm())
+  return new PlantillaVarier()
 }

@@ -1158,6 +1158,9 @@ function bloqueAnadir(o, compacto) {
           'La música con derechos de autor puede ser bloqueada o silenciada por las plataformas.</p>'
         : '')) +
     selectorCampana +
+    // Fase 7: el contenido de terceros necesita permiso (docs/RIESGOS.md).
+    (compacto ? '' : '<p class="reason aviso-licencia">Usa solo videos tuyos o con permiso de su autor. ' +
+      'Publicar contenido ajeno sin licencia puede hacer que TikTok quite los clips o bloquee las cuentas.</p>') +
     (modo === 'enlace'
       ? '<div class="field"><label for="url">Enlace del video</label>' +
           '<div class="fila-input"><input id="url" type="url" inputmode="url" placeholder="https://youtube.com/…" autocomplete="off" spellcheck="false">' +
@@ -2600,6 +2603,12 @@ const BLOQUES = [
                 [120, '5 días'], [168, '1 semana'], [336, '2 semanas']],
       },
       {
+        key: 'maxRepeticiones',
+        texto: 'Publicar el mismo video, como mucho',
+        tipo: 'lista',
+        lista: [[3, '3 veces'], [5, '5 veces'], [10, '10 veces'], [20, '20 veces'], [50, '50 veces']],
+      },
+      {
         key: 'jitterMinutes',
         texto: 'Cambiar un poco la hora cada día',
         tipo: 'lista',
@@ -2744,7 +2753,7 @@ function vistaFlujo() {
 const BASE = {
   accounts: 20, postsPerDay: 3, dayStartHour: 10, dayEndHour: 23,
   jitterMinutes: 40, clipCooldownMinutes: 90, accountRepeatHours: 72,
-  maxCuentas: 25,
+  maxCuentas: 25, maxRepeticiones: 10,
 };
 
 async function guardarFlujo(valores) {

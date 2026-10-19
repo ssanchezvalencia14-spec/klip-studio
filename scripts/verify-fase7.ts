@@ -177,6 +177,44 @@ check('Panel: Ajustes > Sistema enseña las alertas y el botón de prueba', GUIO
 const ejemplo = readFileSync(join(ROOT, '.env.example'), 'utf8')
 check('.env.example lleva las variables de alertas, vacías', /^TELEGRAM_BOT_TOKEN=$/m.test(ejemplo) && /^RESEND_API_KEY=$/m.test(ejemplo))
 
+// --- 5. Anti-spam y cumplimiento --------------------------------------------------------------
+
+const { SubscriptionCaptionVarier, PlantillaVarier } = await import('../src/variants/captions.js')
+const { validateSettings } = await import('../src/queue/settings.js')
+const baseTexto = { caption: 'Lo que nadie te cuenta de empezar de cero', hashtags: ['consejos', 'directo', 'emprender', 'motivacion'] }
+const cuentas3 = ['acc-03', 'acc-04', 'acc-05']
+const llmFalso = {
+  nombre: 'falso', modelo: 'x', incluidoEnSuscripcion: true,
+  completar: async () => ({
+    ms: 1,
+    texto: '```json\n{"variants":[' +
+      '{"caption":"¿Empezar de cero? Esto es lo que nadie dice","hashtags":["#emprender","consejos","vida"]},' +
+      '{"caption":"Empezar de cero no es el problema. El miedo sí.","hashtags":["miedo","emprender","directo"]},' +
+      '{"caption":"Nadie te avisa de esto al empezar","hashtags":["consejos","inicio","motivacion"]}]}\n```',
+  }),
+}
+const conIA = await new SubscriptionCaptionVarier(llmFalso).vary(baseTexto, cuentas3)
+check(
+  'Textos: con la suscripción cada cuenta recibe una descripción distinta',
+  new Set([...conIA.values()].map((v) => v.caption)).size === 3 && conIA.get('acc-03')?.hashtags[0] === 'emprender',
+  JSON.stringify([...conIA.values()]),
+)
+const sinIA = await new PlantillaVarier().vary(baseTexto, cuentas3)
+check(
+  'Textos: sin IA también cambia la frase, no solo los hashtags',
+  new Set([...sinIA.values()].map((v) => v.caption)).size === 3 && [...sinIA.values()].every((v) => v.caption.length <= 150),
+  JSON.stringify([...sinIA.values()].map((v) => v.caption)),
+)
+check('Textos: el reparto cae a la variación sin IA si la IA falla', readFileSync(join(ROOT, 'scripts', 'schedule.ts'), 'utf8').includes('varier = new PlantillaVarier()'))
+check('Horarios: tope de repeticiones por clip, 10 por defecto', DEFAULTS.maxRepeticiones === 10 && GUION.includes("key: 'maxRepeticiones'"))
+let fueraDeRango = false
+try { validateSettings({ ...DEFAULTS, maxRepeticiones: 0 }) } catch { fueraDeRango = true }
+check('Horarios: un tope de 0 repeticiones se rechaza', fueraDeRango)
+check('El reparto usa el tope guardado en Horarios', readFileSync(join(ROOT, 'scripts', 'schedule.ts'), 'utf8').includes('maxRepeticiones: settings.maxRepeticiones'))
+const riesgos = readFileSync(join(ROOT, 'docs', 'RIESGOS.md'), 'utf8')
+check('docs/RIESGOS.md explica normas de TikTok, tope de repeticiones y licencias', /normas/i.test(riesgos) && /repeticiones/i.test(riesgos) && /licencia/i.test(riesgos))
+check('Videos: aviso de permiso o licencia al añadir un video', GUION.includes('Usa solo videos tuyos o con permiso de su autor'))
+
 await pg.close()
 
 for (const c of checks) {

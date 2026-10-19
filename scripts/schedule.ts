@@ -10,7 +10,7 @@ import { loadEnv, paths } from '../src/lib/env.js'
 import { readJson, workDir } from '../src/lib/fsx.js'
 import { planSchedule, summarize } from '../src/queue/schedule.js'
 import { flowMath, loadSettingsDb } from '../src/queue/settings.js'
-import { destinoDelVideo, franjasDelGrupo, maxRepeticiones, usosPrevios } from '../src/queue/reparto.js'
+import { destinoDelVideo, franjasDelGrupo, usosPrevios } from '../src/queue/reparto.js'
 import { type QueueItem } from '../src/store/store.js'
 /*
  * Postgres y no los ficheros de state/.
@@ -25,7 +25,7 @@ import { OWNER_ID } from '../src/lib/owner.js'
 import { requireEnv } from '../src/lib/env.js'
 import {
   createCaptionVarier,
-  HashtagOnlyVarier,
+  PlantillaVarier,
   type CaptionSet,
 } from '../src/variants/captions.js'
 import type { VariantParams } from '../src/variants/params.js'
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
     startDate,
     days: Number(values.days),
     settings,
-    maxRepeticiones: await maxRepeticiones(db, OWNER_ID),
+    maxRepeticiones: settings.maxRepeticiones,
     usosPrevios: usosPrevios(await store.queue.all(), sourceId),
   })
 
@@ -183,7 +183,7 @@ async function main(): Promise<void> {
       } catch (error) {
         const reason = error instanceof Error ? error.message.split('\n')[0] : String(error)
         console.error(`  ${clipId}: fallo la variacion por modelo (${reason}).`)
-        varier = new HashtagOnlyVarier()
+        varier = new PlantillaVarier()
         console.error(`  Se degrada a "${varier.name}" para los clips restantes.`)
         captionsByClip.set(clipId, await varier.vary(base, accountIds))
       }

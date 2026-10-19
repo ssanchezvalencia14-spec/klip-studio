@@ -103,18 +103,3 @@ export function usosPrevios(items: { sourceId: string; clipId: string; status: s
   }
   return usos
 }
-
-/** El tope de repeticiones por clip guardado en Ajustes (10 si no hay). */
-export async function maxRepeticiones(db: Db, ownerId: string): Promise<number> {
-  try {
-    const filas = await db.query<{ max_repeticiones: number | null }>(
-      `select max_repeticiones from settings where owner_id = $1`,
-      [ownerId],
-    )
-    const n = Number(filas[0]?.max_repeticiones)
-    return Number.isInteger(n) && n >= 1 ? n : 10
-  } catch {
-    // Una base sin la migracion 024 todavia.
-    return 10
-  }
-}

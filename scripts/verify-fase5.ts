@@ -48,7 +48,7 @@ check('Hashtags: elegirHashtags respeta el tope con muchas fijas', elegirHashtag
 
 // --- 2. Videos distintos por dia --------------------------------------------------------
 
-const base = { maxCuentas: 25, postsPerDay: 3, dayStartHour: 10, dayEndHour: 23, jitterMinutes: 40, clipCooldownMinutes: 90, accountRepeatHours: 72 }
+const base = { maxCuentas: 25, maxRepeticiones: 10, postsPerDay: 3, dayStartHour: 10, dayEndHour: 23, jitterMinutes: 40, clipCooldownMinutes: 90, accountRepeatHours: 72 }
 const una = flowMath({ ...base, accounts: 1 })
 check('Una cuenta, 3 al dia, 3 dias de espera: 9 en reserva', una.clipsEnRotacion === 9, JSON.stringify(una))
 check('... y 3 nuevos al dia', una.clipsNeededPerDay === 3, `${una.clipsNeededPerDay}`)

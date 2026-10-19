@@ -662,14 +662,14 @@ function siguientePaso(o) {
       return {
         texto: 'Buscar los mejores momentos',
         sub: s.title,
-        accion: { kind: 'select', source: s.sourceId, label: 'Elegir momentos' },
+        accion: { kind: 'select', source: s.sourceId, label: 'Buscar momentos' },
       };
     }
     if (s.rendered === 0) {
       return {
-        texto: 'Crear los videos de ' + plural(s.clips, 'momento'),
+        texto: 'Armar los clips de ' + plural(s.clips, 'momento'),
         sub: s.title,
-        accion: { kind: 'render', source: s.sourceId, label: 'Renderizar' },
+        accion: { kind: 'render', source: s.sourceId, label: 'Armar clips' },
       };
     }
     /*
@@ -795,7 +795,7 @@ function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
   const acciones = [
     null,
     ['select', 'Buscar los mejores momentos'],
-    ['render', 'Crear los videos'],
+    ['render', 'Armar clips'],
     ['subir', 'Subir para revisar'],
     ['variants', 'Hacer una copia por cuenta'],
   ];
@@ -2075,7 +2075,7 @@ function tarjetaDiagnostico() {
   const ocupado = Boolean(state.jobs.find(vivo));
   return '<article class="card flat"><div class="body">' +
       '<button class="chip" data-run="doctor"' + (ocupado ? ' disabled' : '') + '>' +
-      'Revisar que todo funciona</button>' +
+      'Probar el sistema</button>' +
       '<details class="nota"><summary>Cuando usar esto</summary>' +
         '<p>Comprueba que el programa tiene todo lo que necesita para funcionar. ' +
         'Sirve cuando algo falla y no sabes por que.</p>' +
@@ -2154,8 +2154,8 @@ function vistaRegistro() {
 }
 
 const NOMBRES = {
-  ingest: 'Transcribir', select: 'Elegir momentos', render: 'Renderizar',
-  variants: 'Variantes', schedule: 'Repartir', publish: 'Publicar', metrics: 'Metricas',
+  ingest: 'Descargar y transcribir', select: 'Buscar momentos', render: 'Armar clips',
+  variants: 'Copias por cuenta', schedule: 'Repartir', publish: 'Publicar', metrics: 'Resultados',
 };
 
 // --- Vista: flujo ---------------------------------------------------------
@@ -3820,7 +3820,7 @@ document.addEventListener('click', async e => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids }),
       });
-      avisar(reintentar ? 'Se vuelve a intentar.' : 'Quitado de Inicio. Sigue en el Historial.');
+      avisar(reintentar ? 'Se vuelve a intentar.' : 'Quitado de Inicio. Sigue en Ajustes, Sistema.');
     } catch (err) {
       avisar(err.message);
     }

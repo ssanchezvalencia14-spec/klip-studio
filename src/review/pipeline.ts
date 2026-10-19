@@ -158,7 +158,7 @@ export function buildJob(
       args.push('--min', String(requireNumber(minSec, 'Duracion minima', 10, 60)))
       args.push('--max', String(requireNumber(maxSec, 'Duracion maxima', 30, 180)))
 
-      return { kind: 'select', args, label: `Elegir momentos de ${sourceId}` }
+      return { kind: 'select', args, label: `Buscar momentos de ${sourceId}` }
     }
 
     /*
@@ -330,7 +330,7 @@ export function buildJob(
       return {
         kind: 'render',
         args,
-        label: soloUno === '' ? `Renderizar ${sourceId}` : `Rehacer ${soloUno} de ${sourceId}`,
+        label: soloUno === '' ? `Armar clips de ${sourceId}` : `Volver a armar ${soloUno} de ${sourceId}`,
       }
     }
 

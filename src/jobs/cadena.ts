@@ -126,7 +126,7 @@ function siguientePaso(job: Job): { kind: PasoEncadenable; sourceId: string } | 
 const ETIQUETAS = {
   select: (id: string) => `Buscar momentos de ${id}`,
   momentos: (id: string) => `Buscar estribillos de ${id}`,
-  render: (id: string) => `Crear los videos de ${id}`,
+  render: (id: string) => `Armar clips de ${id}`,
   subir: (id: string) => `Subir para revisar ${id}`,
   schedule: (id: string) => `Repartir ${id} entre las cuentas`,
 }

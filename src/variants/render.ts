@@ -7,6 +7,7 @@ import { createLogger, formatDuration } from '../lib/logger.js'
 import { ffmpeg, probe } from '../lib/proc.js'
 import { PLAY_RES_X, PLAY_RES_Y } from '../render/ass.js'
 import { deriveParams, type VariantParams } from './params.js'
+import { argsCalidadVideo, bitrateAudio } from '../render/calidad.js'
 
 const log = createLogger('variants')
 
@@ -76,7 +77,6 @@ export async function renderVariant(
   const outDir = ensureDir(join(paths.out, sourceId, 'variants', clipId))
   const target = join(outDir, `${accountId}.mp4`)
 
-  const cq = optionalEnv('NVENC_CQ') ?? '21'
   const preset = optionalEnv('NVENC_PRESET') ?? 'p6'
 
   await ffmpeg([
@@ -95,12 +95,8 @@ export async function renderVariant(
     preset,
     '-tune',
     'hq',
-    '-rc',
-    'vbr',
-    '-cq',
-    cq,
-    '-b:v',
-    '0',
+    // La misma calidad y techo que el clip original: src/render/calidad.ts.
+    ...argsCalidadVideo(),
     '-profile:v',
     'high',
     '-pix_fmt',
@@ -108,7 +104,7 @@ export async function renderVariant(
     '-c:a',
     'aac',
     '-b:a',
-    '192k',
+    bitrateAudio(),
     '-ar',
     '44100',
     '-ac',

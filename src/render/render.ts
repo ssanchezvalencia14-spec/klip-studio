@@ -5,6 +5,7 @@ import { createLogger, formatDuration } from '../lib/logger.js'
 import { ffmpeg, probe } from '../lib/proc.js'
 import type { Transcript } from '../types.js'
 import { buildAss, PLAY_RES_X, PLAY_RES_Y, type AssOptions } from './ass.js'
+import { argsCalidadVideo, bitrateAudio } from './calidad.js'
 
 const log = createLogger('render')
 
@@ -200,7 +201,7 @@ export async function renderClip(
 
   const duration = clip.end - clip.start
   const blurSigma = options.blurSigma ?? Number(optionalEnv('BLUR_SIGMA') ?? '30')
-  const cq = options.cq ?? Number(optionalEnv('NVENC_CQ') ?? '21')
+  const cq = options.cq ?? Number(optionalEnv('NVENC_CQ') ?? '24')
   const preset = options.preset ?? optionalEnv('NVENC_PRESET') ?? 'p6'
 
   log.info(
@@ -234,12 +235,8 @@ export async function renderClip(
     preset,
     '-tune',
     'hq',
-    '-rc',
-    'vbr',
-    '-cq',
-    String(cq),
-    '-b:v',
-    '0',
+    // Calidad y techo de bitrate: ver src/render/calidad.ts.
+    ...argsCalidadVideo(cq),
     '-profile:v',
     'high',
     '-pix_fmt',
@@ -247,7 +244,7 @@ export async function renderClip(
     '-c:a',
     'aac',
     '-b:a',
-    '192k',
+    bitrateAudio(),
     '-ar',
     '44100',
     '-ac',

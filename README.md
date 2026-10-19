@@ -56,7 +56,7 @@ Ninguna clave viaja en el repositorio. Las once que van vacías en
 | Variable | Para qué |
 |---|---|
 | `DATABASE_URL` | Postgres (Supabase). Sin esto no arranca nada |
-| `ANTHROPIC_API_KEY` | Elegir los mejores momentos del VOD |
+| `LLM_PROVIDER` | Elegir momentos: `claude-cli` (tu suscripción de Claude, sin clave; ver [docs/IA.md](docs/IA.md)) o `anthropic-api` con `ANTHROPIC_API_KEY` |
 | `UPLOAD_POST_API_KEY` | Publicar en TikTok |
 | `REVIEW_PASSWORD` | La llave del panel cuando se expone a internet |
 | `HOSTINGER_API_TOKEN` | Solo para desplegar. **Da control total de la cuenta** |

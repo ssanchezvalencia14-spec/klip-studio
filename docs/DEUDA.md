@@ -30,10 +30,10 @@ Hay que rotar igual:
 |---|---|---|---|
 | A1 | **El acceso al panel es una llave en la URL** (`?k=`). Queda en el historial, los logs y los referrers. No hay usuarios, roles ni bloqueo por intentos | `authorized()` en `src/review/server.ts` | 2 |
 | A2 | **Sin `REVIEW_KEY` ni `REVIEW_PASSWORD`, el panel no pide nada.** Solo lo protege que entonces escucha en local. Un error de configuración en Hostinger lo deja abierto | `authorized()` devuelve `true` | 2 |
-| A3 | **Una `ANTHROPIC_API_KEY` del entorno de Windows pisa la del `.env`** sin avisar, y el trabajador pasa todo su entorno a cada script. Causa probable del 401 | `loadEnv()`, `scripts/worker.ts` | 1 |
+| A3 | ~~Resuelto en Fase 1~~ (el CLI se lanza sin ANTHROPIC_*). **Una `ANTHROPIC_API_KEY` del entorno de Windows pisa la del `.env`** sin avisar, y el trabajador pasa todo su entorno a cada script. Causa probable del 401 | `loadEnv()`, `scripts/worker.ts` | 1 |
 | A4 | **El trabajador y el panel comparten la credencial completa de la base** (`DATABASE_URL`). No hay token de servicio: quien tenga el PC tiene la base entera | `scripts/worker.ts` | 2 |
-| A5 | **El encadenado corre en cada panel que esté encendido** (Hostinger, `npm run review` local, vista previa). Cada uno guarda en memoria lo que ya encadenó, así que dos paneles encolan el mismo paso dos veces. Probable contribución a las 28 ejecuciones de "Elegir momentos" | `arrancarCadena()` en `src/jobs/cadena.ts` | 1 y 4 |
-| A6 | **No hay tope de reintentos por video para la IA.** `MAX_INTENTOS = 3` solo vale para tareas perdidas (PC apagado). Una tarea que falla queda en `error`, y nada impide relanzarla a mano o por la cadena una y otra vez | `src/jobs/cola.ts` | 1 y 4 |
+| A5 | ~~Resuelto en Fase 1~~ (se comprueba en la base antes de encolar). **El encadenado corre en cada panel que esté encendido** (Hostinger, `npm run review` local, vista previa). Cada uno guarda en memoria lo que ya encadenó, así que dos paneles encolan el mismo paso dos veces. Probable contribución a las 28 ejecuciones de "Elegir momentos" | `arrancarCadena()` en `src/jobs/cadena.ts` | 1 y 4 |
+| A6 | ~~En parte en Fase 1~~ (2 reintentos por tarea y pausa sin bucle en la IA; el resto de pasos, Fase 4). **No hay tope de reintentos por video para la IA.** `MAX_INTENTOS = 3` solo vale para tareas perdidas (PC apagado). Una tarea que falla queda en `error`, y nada impide relanzarla a mano o por la cadena una y otra vez | `src/jobs/cola.ts` | 1 y 4 |
 | A7 | **Hay mensajes técnicos en pantalla**: el error 401 manda a editar el `.env`, y otros muestran nombres de variables y la salida cruda de los scripts | `src/select/fallo.ts`, `scripts/select.ts` (`explain`), registro de tareas en el panel | 1 y 5 |
 
 ## Medio
@@ -50,7 +50,7 @@ Hay que rotar igual:
 | M8 | **Sin almacenamiento acotado**: los másteres (~30 MB por clip) y los VOD se quedan en `out/` y `work/` para siempre. No hay aviso de disco | `out/`, `work/` | 4 |
 | M9 | **Un solo dueño fijo en el código** (`OWNER_ID = 1111...`). El modelo de datos tiene `owner_id`, pero nada lo usa de verdad | `src/lib/owner.ts` | 2 y 7 |
 | M10 | **Topes de cuentas cosidos al texto** ("20 cuentas", "25 perfiles") en documentos y en partes del panel | varios | 5 y 7 |
-| M11 | **La IA de los pies de texto también usa la API de pago.** Si solo se cambia "Elegir momentos" a la suscripción, `variants` sigue dando 401 o cae a una variación detectable | `src/variants/captions.ts` | 1 |
+| M11 | **Sigue abierto tras la Fase 1.** **La IA de los pies de texto también usa la API de pago.** Si solo se cambia "Elegir momentos" a la suscripción, `variants` sigue dando 401 o cae a una variación detectable | `src/variants/captions.ts` | 1 |
 
 ## Bajo
 

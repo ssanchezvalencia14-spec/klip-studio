@@ -8,7 +8,8 @@ import { copyFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { extractAudio } from '../src/ingest/audio.js'
-import { downloadSource, fetchMetadata } from '../src/ingest/download.js'
+import { downloadSource, esBloqueoYoutube, fetchMetadata } from '../src/ingest/download.js'
+import { SALIDA_NO_REINTENTAR } from '../src/jobs/reintentos.js'
 import { isKickVod, metadataFromKick } from '../src/ingest/kick.js'
 import { metadataFromFile } from '../src/ingest/local.js'
 import { loadEnv } from '../src/lib/env.js'
@@ -122,6 +123,24 @@ async function main(): Promise<void> {
     transcript = parseTranscript(meta.id, rawPath, meta.durationSec, values.lang)
   } catch (error) {
     run.fail(error)
+    const texto = error instanceof Error ? `${error.message}\n${(error as { stderr?: string }).stderr ?? ''}` : String(error)
+    /*
+     * Fallos que no se arreglan reintentando: se explican y se sale con
+     * SALIDA_NO_REINTENTAR para que el trabajador no insista. La frase va la
+     * ultima porque es la que enseña el panel en la tarjeta del video.
+     */
+    if (esBloqueoYoutube(texto)) {
+      // La linea de yt-dlp que lo dice, para el registro completo.
+      console.error(texto.split('\n').find((l) => l.includes('ERROR:')) ?? '')
+      console.log('YouTube bloqueó la descarga. Sube el MP4 directamente o configura las cookies.')
+      process.exitCode = SALIDA_NO_REINTENTAR
+      return
+    }
+    if (/no devolvio duracion|is_live|live event will begin/i.test(texto)) {
+      console.log('Es un directo en curso. Añádelo cuando termine, o sube la grabación en MP4.')
+      process.exitCode = SALIDA_NO_REINTENTAR
+      return
+    }
     throw error
   }
 

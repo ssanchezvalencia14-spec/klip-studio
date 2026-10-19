@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { bin, optionalEnv } from '../lib/env.js'
 import { fileSizeMb, hasContent, workDir, writeJson } from '../lib/fsx.js'
 import { createLogger, formatDuration } from '../lib/logger.js'
@@ -64,6 +64,26 @@ function clientesYoutube(): string {
 }
 
 /** Consulta los metadatos sin descargar el video. */
+/**
+ * Cookies del navegador para yt-dlp, si se eligio uno.
+ *
+ * Lo elige un administrador en Ajustes, Sistema, y el trabajador lo pasa en
+ * YTDLP_COOKIES_FROM_BROWSER. Las cookies son la sesion de YouTube: solo
+ * tienen sentido para contenido propio o cuando YouTube pide demostrar que no
+ * eres un bot.
+ */
+export function cookiesYtdlp(): string[] {
+  const navegador = optionalEnv('YTDLP_COOKIES_FROM_BROWSER')
+  if (navegador === undefined) return []
+  log.warn(`Usando cookies de ${navegador}: yt-dlp accedera a tu sesion.`)
+  return ['--cookies-from-browser', navegador]
+}
+
+/** Si un fallo de yt-dlp es el bloqueo de YouTube por "bot". Reintentar no sirve. */
+export function esBloqueoYoutube(texto: string): boolean {
+  return /confirm you.?re not a bot|sign in to confirm|use --cookies-from-browser or --cookies/i.test(texto)
+}
+
 export async function fetchMetadata(url: string): Promise<SourceMeta> {
   log.info(`Consultando metadatos: ${url}`)
 
@@ -73,6 +93,9 @@ export async function fetchMetadata(url: string): Promise<SourceMeta> {
     '--skip-download',
     '--extractor-args',
     clientesYoutube(),
+    // Las cookies tambien aqui: el aviso de "no eres un bot" llega al pedir
+    // los metadatos, antes de descargar nada.
+    ...cookiesYtdlp(),
     '--print',
     `%(.{${METADATA_FIELDS}})j`,
     url,
@@ -140,8 +163,6 @@ export async function downloadSource(meta: SourceMeta): Promise<string> {
     '--no-playlist',
     '--no-warnings',
     '--newline',
-    '--ffmpeg-location',
-    dirname(bin.ffmpeg),
     '-f',
     optionalEnv('YTDLP_FORMAT') ?? 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b',
     '--merge-output-format',
@@ -152,13 +173,12 @@ export async function downloadSource(meta: SourceMeta): Promise<string> {
 
   // El mismo cliente que en los metadatos: ver clientesYoutube(). Sin el,
   // YouTube deja empezar la descarga y la corta a mitad con un 403.
+  // El ffmpeg bueno, si esta fijado. Por el PATH, yt-dlp ya lo encuentra solo.
+  if (isAbsolute(bin.ffmpeg)) args.push('--ffmpeg-location', dirname(bin.ffmpeg))
+
   args.push('--extractor-args', clientesYoutube())
 
-  const cookiesBrowser = optionalEnv('YTDLP_COOKIES_FROM_BROWSER')
-  if (cookiesBrowser !== undefined) {
-    log.warn(`Usando cookies de ${cookiesBrowser}: yt-dlp accedera a tu sesion.`)
-    args.push('--cookies-from-browser', cookiesBrowser)
-  }
+  args.push(...cookiesYtdlp())
 
   args.push(meta.url)
 

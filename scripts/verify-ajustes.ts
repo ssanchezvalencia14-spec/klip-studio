@@ -252,7 +252,7 @@ const conEstilo = await saveClipSettings(db, OWNER, {
   subtitles: true,
   subFont: 'Tahoma',
   subSize: 60,
-  subMargin: 300,
+  subMargin: 450,
   subColor: '#FFEE00',
   subColorBorde: '#101010',
   subBorde: 12,
@@ -276,7 +276,7 @@ check(
   render.args[0] === 'vod-uno' &&
     sigue('--sub-font') === 'Tahoma' &&
     sigue('--sub-size') === '60' &&
-    sigue('--sub-margin') === '300' &&
+    sigue('--sub-margin') === '450' &&
     sigue('--sub-color') === '#FFEE00' &&
     sigue('--sub-color-borde') === '#101010' &&
     sigue('--sub-borde') === '12' &&

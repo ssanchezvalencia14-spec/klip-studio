@@ -1276,7 +1276,8 @@ function vistaProceso() {
   if (!o) return esqueleto(2, true);
 
   const fallos = agruparFallos(state.jobs).slice(0, 3);
-  const avisos = pintarAvisoIA(o.ia) + fallos.map(pintarGrupoFallo).join('');
+  // Con la IA en pausa, eso YA es el siguiente paso: no se repite abajo.
+  const avisos = (o.ia && o.ia.pausada ? '' : pintarAvisoIA(o.ia)) + fallos.map(pintarGrupoFallo).join('');
 
   return pintarFlujo(o) +
     '<div class="rejilla-inicio">' +
@@ -3297,6 +3298,14 @@ function render() {
    * media lista de clips y la pagina salta al principio sola. Por eso se
    * compara con la ultima pintada y solo se sube cuando de verdad cambio.
    */
+  /*
+   * Las entradas animadas, solo al LLEGAR a una pantalla.
+   *
+   * render() corre tambien en cada aviso del servidor, varias veces por
+   * minuto. Si las tarjetas entraran otra vez en cada uno, la pantalla
+   * parpadearia sin que nada haya cambiado.
+   */
+  view.classList.toggle('quieto', render.ultima === state.view);
   if (render.ultima !== state.view) {
     render.ultima = state.view;
     scrollTo({ top: 0, behavior: 'instant' });

@@ -54,6 +54,8 @@ export const CSS = `  :root {
     /* Acento. Relleno, texto sobre oscuro, fondo suave y tarjeta destacada. */
     --azul: #5B7CFF;
     --azul-texto: #8FA5FF;
+    /* Texto encima del azul de relleno. */
+    --sobre-acento: #FFFFFF;
     --indigo: #8FA5FF;
     --indigo-texto: #B9C6FF;
     --azul-hueco: #1B2140;
@@ -2088,7 +2090,7 @@ export const CSS = `  :root {
     color: var(--indigo-texto); background: var(--azul-hueco); font-weight: 600;
   }
   #nav button[aria-current="true"] .ico-svg { color: var(--azul-texto); }
-  #nav button b { background: var(--azul); color: #fff; font-family: var(--fuente-dato); }
+  #nav button b { background: var(--azul); color: var(--sobre-acento); font-family: var(--fuente-dato); }
 
   /* Estado del procesador, abajo del menu. */
   .nav-estado {
@@ -2153,4 +2155,164 @@ export const CSS = `  :root {
     }
     body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
   }
+
+  /* =====================================================================
+   * Fase 3: Inicio y Videos.
+   * ===================================================================== */
+
+  main#view { max-width: 1240px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s6); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-tarjeta); }
+  .card .body { padding: var(--s5); }
+  .ante {
+    font-size: var(--t-micro); font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint); margin: 0 0 var(--s3);
+  }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: var(--r-control); }
+  .chip .ico-svg, .act .ico-svg { width: 16px; height: 16px; }
+  button.act { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: var(--r-control); }
+  .act.go { background: var(--azul); color: var(--sobre-acento); border: 0; font-weight: 600; }
+
+  /* Las cuatro tarjetas del flujo. */
+  .flujo { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); margin-bottom: var(--s4); }
+  .paso-flujo {
+    display: grid; grid-template-columns: 1fr auto; grid-template-areas: "cab cab" "num num" "nombre unidad";
+    gap: 2px var(--s2); text-align: left; cursor: pointer;
+    padding: var(--s4); border-radius: var(--r-tarjeta);
+    background: var(--panel); border: 1px solid var(--line); color: var(--text); font: inherit;
+  }
+  @media (hover: hover) { .paso-flujo:hover { border-color: var(--linea-viva); background: var(--raised); } }
+  .paso-flujo.pide { background: var(--destacada); border-color: var(--destacada-borde); }
+  .paso-cab { grid-area: cab; display: flex; align-items: center; justify-content: space-between; color: var(--dim); }
+  .paso-flujo.pide .paso-cab { color: var(--azul-texto); }
+  .paso-num { font-size: var(--t-micro); color: var(--faint); }
+  .paso-flujo b { grid-area: num; font-family: var(--fuente-titulo); font-size: 34px; font-weight: 650; line-height: 1.1; letter-spacing: -.02em; }
+  .paso-nombre { grid-area: nombre; font-weight: 600; font-size: var(--t-cuerpo); }
+  .paso-unidad { grid-area: unidad; align-self: end; font-size: var(--t-meta); color: var(--faint); }
+
+  /* Inicio: dos columnas. */
+  .rejilla-inicio { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+  .col-principal, .col-lateral { display: flex; flex-direction: column; gap: var(--s4); }
+  .col-principal section { display: flex; flex-direction: column; gap: var(--s3); }
+  .siguiente { background: var(--destacada); border-color: var(--destacada-borde); }
+  .siguiente h2 { font-size: 24px; font-weight: 650; margin: 0 0 var(--s2); line-height: 1.25; }
+  .siguiente .reason { margin: 0; color: var(--dim); }
+  .siguiente .actions { margin-top: var(--s4); }
+
+  .estado-lista { list-style: none; margin: 0 0 var(--s4); padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
+  .estado-lista li { display: flex; align-items: center; gap: var(--s3); color: var(--dim); }
+  .estado-nombre { color: var(--text); font-weight: 600; min-width: 84px; }
+  .estado-texto { flex: 1; font-size: var(--t-meta); }
+
+  .actividad { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .actividad li { display: flex; align-items: center; gap: var(--s3); padding: 10px 0; border-top: 1px solid var(--line); }
+  .actividad li:first-child { border-top: 0; padding-top: 0; }
+  .actividad li .ico-svg { color: var(--ok-texto); }
+  .actividad li span { flex: 1; }
+  .actividad time { font-size: var(--t-meta); color: var(--faint); }
+
+  /* Añadir video. */
+  .segmento {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: var(--s4);
+    background: var(--hueco); border: 1px solid var(--line); border-radius: var(--r-control);
+  }
+  .segmento button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px;
+    border: 0; border-radius: 9px; background: none; color: var(--dim); font: inherit; font-weight: 500; cursor: pointer;
+  }
+  .segmento button[aria-selected="true"] { background: var(--raised); color: var(--text); font-weight: 600; }
+  .tipos { border: 0; padding: 0; margin: 0 0 var(--s3); display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .tipos legend { font-size: var(--t-meta); color: var(--dim); margin-bottom: var(--s2); padding: 0; }
+  .tipo { display: inline-flex; }
+  .tipo input { position: absolute; opacity: 0; pointer-events: none; }
+  .tipo span {
+    display: inline-flex; align-items: center; min-height: var(--alto-control); padding: 0 14px; cursor: pointer;
+    border-radius: var(--r-pildora); border: 1px solid var(--line); color: var(--dim); background: var(--panel);
+  }
+  .tipo input:checked + span { border-color: var(--azul-borde); background: var(--azul-hueco); color: var(--indigo-texto); font-weight: 600; }
+  .tipo input:focus-visible + span { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--foco); }
+  .fila-input { display: flex; gap: var(--s2); }
+  .fila-input input { flex: 1; min-width: 0; }
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s2);
+    min-height: 120px; padding: var(--s4); text-align: center; cursor: pointer;
+    border: 1.5px dashed var(--linea-viva); border-radius: var(--r-tarjeta); color: var(--dim); background: var(--hueco);
+  }
+  .drop .ico-svg { width: 24px; height: 24px; color: var(--azul-texto); }
+  .drop.over { border-color: var(--azul); background: var(--azul-hueco); }
+
+  /* Videos. */
+  .rejilla-videos { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+  .col-anadir { position: sticky; top: 84px; }
+  .col-lista { display: flex; flex-direction: column; gap: var(--s3); }
+  .col-lista .cascada { display: flex; flex-direction: column; gap: var(--s3); }
+  .filtros { display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .filtros .tab {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px;
+    border-radius: var(--r-pildora); border: 1px solid var(--line); background: var(--panel); color: var(--dim);
+    font: inherit; cursor: pointer;
+  }
+  .filtros .tab[aria-selected="true"] { background: var(--azul-hueco); border-color: var(--azul-borde); color: var(--indigo-texto); font-weight: 600; }
+  .filtros .tab .dato { font-size: var(--t-micro); color: var(--faint); }
+
+  .video-cab { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+  .video-cab .srctitle { font-size: 17px; font-weight: 600; text-align: left; }
+  .video-meta { margin: 4px 0 var(--s4); font-size: var(--t-meta); color: var(--faint); }
+  .video-nota { margin: var(--s3) 0; color: var(--dim); font-size: var(--t-meta); }
+
+  .estado-chip {
+    display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap;
+    padding: 4px 10px; border-radius: var(--r-pildora); font-size: var(--t-micro); font-weight: 600;
+    background: var(--raised); color: var(--dim); border: 1px solid var(--line);
+  }
+  .estado-chip .ico-svg { width: 14px; height: 14px; }
+  .estado-chip.ok { background: var(--ok-fondo); color: var(--ok-texto); border-color: var(--ok-borde); }
+  .estado-chip.error { background: var(--error-fondo); color: var(--error-texto); border-color: var(--error-borde); }
+  .estado-chip.aviso { background: var(--aviso-fondo); color: var(--aviso-texto); border-color: var(--aviso-borde); }
+  .estado-chip.info { background: var(--azul-hueco); color: var(--indigo-texto); border-color: var(--azul-borde); }
+
+  .etapas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s2); }
+  .etapa { display: flex; flex-direction: column; gap: 6px; font-size: var(--t-micro); color: var(--faint); }
+  .etapa-barra { position: relative; height: 6px; border-radius: var(--r-pildora); background: var(--raised); overflow: hidden; }
+  .etapa-barra i { position: absolute; inset: 0; width: 0; border-radius: inherit; background: var(--azul); }
+  .etapa.hecha { color: var(--dim); }
+  .etapa.hecha .etapa-barra i { width: 100%; background: var(--ok-texto); }
+  .etapa.actual, .etapa.activa { color: var(--text); font-weight: 600; }
+  .etapa.actual .etapa-barra i { width: 12%; }
+  .etapa.activa .etapa-barra i { width: 55%; }
+  /* El brillo solo mientras hay trabajo de verdad en esa etapa. */
+  .etapa.activa .etapa-barra::after {
+    content: ""; position: absolute; inset: 0; width: 50%;
+    background: linear-gradient(90deg, transparent, var(--barrido), transparent);
+    animation: brillo 1.4s ease-in-out infinite;
+  }
+  .etapa.fallo { color: var(--error-texto); font-weight: 600; }
+  .etapa.fallo .etapa-barra i { width: 100%; background: var(--error-texto); }
+  .video-card.trabajando { border-color: var(--destacada-borde); }
+
+  /* Entrada de tarjetas: subir 10 px y aparecer, escalonado. */
+  .cascada > * { animation: entra var(--m-entrada) var(--e-salida) both; }
+
+  @media (max-width: 1099px) {
+    .rejilla-inicio, .rejilla-videos { grid-template-columns: minmax(0, 1fr); }
+    .col-anadir { position: static; }
+  }
+  @media (max-width: 640px) {
+    main#view { padding: var(--s4) var(--s4) var(--s6); }
+    .flujo { grid-template-columns: repeat(2, 1fr); }
+    .card .body { padding: var(--s4); }
+    .etapas { grid-template-columns: repeat(2, 1fr); row-gap: var(--s3); }
+    .siguiente h2 { font-size: 21px; }
+  }
+
+  /* Las pantallas rediseñadas llevan su propia rejilla: nada de columnas de texto. */
+  main.vista-proceso, main.vista-videos, main.vista-clips, main.vista-cola, main.vista-metricas,
+  main.vista-plataformas, main.vista-proyectos, main.vista-ia, main.vista-usuarios,
+  main.vista-registro, main.vista-flujo, main.vista-ajustes {
+    column-count: 1;
+  }
+  .cabecera .anadir { flex: none; padding: 0 16px; }
+  @media (max-width: 899px) { .cabecera .anadir { padding: 0; } }
+
+  /* Repintar la misma pantalla no vuelve a animar la entrada. */
+  main.quieto .cascada > *, main.quieto .paso-1, main.quieto .paso-2 { animation: none; }
 `

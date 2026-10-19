@@ -36,8 +36,18 @@ const SECCIONES = {
     ['ajustes', 'Marca y textos'],
     ['ia', 'IA'],
     ['registro', 'Historial'],
+    ['usuarios', 'Usuarios'],
   ] },
 };
+
+/*
+ * Lo que un operador no ve.
+ *
+ * Revisa, aprueba y mira la agenda; la configuracion es del administrador. El
+ * servidor ya rechaza los cambios (ver permitido() en src/auth/auth.ts): esto
+ * solo evita enseñar pantallas cuyos botones no van a funcionar.
+ */
+const SOLO_ADMIN = ['proyectos', 'plataformas', 'flujo', 'ajustes', 'ia', 'usuarios'];
 
 /**
  * Que es cada pantalla, en una linea.
@@ -57,6 +67,7 @@ const INTROS = {
   ajustes: 'Como se cortan los videos, como se ven los subtitulos y que texto los acompaña.',
   registro: 'Todo lo que ha hecho el programa, lo que tardo y lo que costo.',
   ia: 'La IA que elige los mejores momentos: si está lista y cómo probarla.',
+  usuarios: 'Quién puede entrar al panel y qué puede hacer cada uno.',
 };
 
 /** De que seccion es cada vista. Se deriva del mapa para no repetirlo. */
@@ -368,6 +379,11 @@ async function proyectoAccion(body, hecho) {
 
 async function api(path, options) {
   const res = await fetch(path, options);
+  // La sesion caduco o se cerro en otro sitio: a la entrada, sin mas.
+  if (res.status === 401) {
+    location.href = '/login';
+    throw new Error('Tu sesión terminó. Vuelve a entrar.');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
   return data;
@@ -412,6 +428,7 @@ async function refrescar() {
     state.ia = ia;
     state.jobs = jobs.jobs;
   }
+  if (state.view === 'usuarios') state.usuarios = await api('/api/usuarios');
   if (state.view === 'flujo') state.settings = await api('/api/settings');
   if (state.view === 'ajustes') state.ajustes = await api('/api/ajustes');
   if (state.view === 'proyectos') {
@@ -1235,6 +1252,72 @@ function pintarAvisoIA(ia) {
       '<button class="chip" data-ir="ia">Ver la IA</button>' +
     '</div>' +
   '</div></div></article>';
+}
+
+// --- Vista: usuarios --------------------------------------------------------
+
+/**
+ * Quien entra al panel. Solo la ve un administrador.
+ *
+ * No hay registro publico: las cuentas se crean aqui. La contraseña que se
+ * pone es provisional y la persona la cambia al entrar. Si alguien la olvida,
+ * se le pone otra nueva desde su fila: es la recuperacion mientras no haya
+ * correo configurado.
+ */
+function vistaUsuarios() {
+  const d = state.usuarios;
+  if (!d) return esqueleto(2, false);
+  const yo = state.yo && state.yo.email;
+
+  let html = '<article class="card"><div class="body">' +
+    '<p class="hook" style="margin-top:0">Añadir una persona</p>' +
+    '<form id="usuario-nuevo" class="usuario-form" style="display:grid;gap:10px">' +
+      '<input name="email" type="email" required placeholder="Correo" aria-label="Correo" autocomplete="off">' +
+      '<input name="nombre" placeholder="Nombre (opcional)" aria-label="Nombre">' +
+      '<select name="rol" aria-label="Rol">' +
+        '<option value="operador">Operador: revisa, aprueba y ve la agenda</option>' +
+        '<option value="admin">Administrador: todo, también la configuración</option>' +
+      '</select>' +
+      '<input name="contrasena" type="password" required minlength="10" autocomplete="new-password" ' +
+        'placeholder="Contraseña provisional (mínimo 10)" aria-label="Contraseña provisional">' +
+      '<button class="act go" type="submit">Crear</button>' +
+    '</form>' +
+    '<p class="reason" style="margin:var(--s3) 0 0">Dale la contraseña en persona o por un canal seguro. ' +
+      'Al entrar, el panel le pedirá que elija la suya.</p>' +
+  '</div></article>';
+
+  html += seccion('&#9776;', d.usuarios.length === 1 ? '1 persona' : d.usuarios.length + ' personas', '') +
+    d.usuarios.map(u => {
+      const soyYo = u.email === yo;
+      return '<article class="card"><div class="body">' +
+        '<div class="joghead">' +
+          '<span class="jobname">' + esc(u.nombre || u.email) + (soyYo ? ' (tú)' : '') + '</span>' +
+          '<span class="badge' + (u.activo ? '' : ' bad') + '">' +
+            (u.activo ? (u.rol === 'admin' ? 'administrador' : 'operador') : 'sin acceso') + '</span>' +
+        '</div>' +
+        '<p class="reason" style="margin:var(--s2) 0 0">' + esc(u.email) +
+          (u.ultimoAcceso ? ' · entró por última vez ' + fecha(u.ultimoAcceso) : ' · todavía no ha entrado') +
+          (u.debeCambiar ? ' · tiene contraseña provisional' : '') + '</p>' +
+        (soyYo
+          ? '<div class="actions" style="margin-top:10px"><a class="chip" href="/cuenta/contrasena">Cambiar mi contraseña</a></div>'
+          : '<div class="actions" style="margin-top:10px">' +
+              '<button class="chip" data-usuario="' + u.id + '" data-cambio="rol" data-valor="' +
+                (u.rol === 'admin' ? 'operador' : 'admin') + '">' +
+                (u.rol === 'admin' ? 'Pasar a operador' : 'Hacer administrador') + '</button>' +
+              '<button class="chip" data-usuario="' + u.id + '" data-cambio="activo" data-valor="' + (!u.activo) + '">' +
+                (u.activo ? 'Quitar acceso' : 'Devolver acceso') + '</button>' +
+            '</div>' +
+            '<details style="margin-top:10px"><summary class="reason">Ponerle una contraseña nueva</summary>' +
+              '<form class="usuario-clave" data-usuario="' + u.id + '" style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">' +
+                '<input name="contrasena" type="password" required minlength="10" autocomplete="new-password" ' +
+                  'placeholder="Nueva, mínimo 10" aria-label="Contraseña nueva" style="flex:1;min-width:180px">' +
+                '<button class="chip" type="submit">Guardar</button>' +
+              '</form>' +
+            '</details>') +
+      '</div></article>';
+    }).join('');
+
+  return html;
 }
 
 // --- Vista: IA ------------------------------------------------------------
@@ -3093,6 +3176,7 @@ function render() {
   if (state.view === 'cola') view.innerHTML = vistaCola();
   if (state.view === 'registro') view.innerHTML = vistaRegistro();
   if (state.view === 'ia') view.innerHTML = vistaIA();
+  if (state.view === 'usuarios') view.innerHTML = vistaUsuarios();
   if (state.view === 'flujo') view.innerHTML = vistaFlujo();
   if (state.view === 'ajustes') view.innerHTML = vistaAjustes();
   if (state.view === 'proyectos') view.innerHTML = vistaProyectos();
@@ -3912,7 +3996,77 @@ render();
  * en pantalla y tapar lo que se esta leyendo con un error seria peor. Un
  * fallo pasajero se resuelve solo en el siguiente aviso del servidor.
  */
-refrescar().catch((error) => {
+/*
+ * Quien soy, antes de pintar nada.
+ *
+ * Un operador no ve las pestañas de configuracion. Se quitan de la lista de
+ * vistas una sola vez, y con eso desaparecen del menu, de las pestañas y del
+ * buscador, que leen todos de SECCIONES.
+ */
+async function cargarYo() {
+  try {
+    state.yo = await api('/api/yo');
+  } catch {
+    state.yo = null;
+  }
+  if (state.yo && state.yo.rol !== 'admin') {
+    SECCIONES.config.vistas = SECCIONES.config.vistas.filter(([v]) => !SOLO_ADMIN.includes(v));
+  }
+  const salir = document.getElementById('salir');
+  if (salir && state.yo && state.yo.email) salir.title = 'Cerrar sesión (' + state.yo.email + ')';
+  // Sin sesion de usuario (vista previa o llave antigua) no hay nada que cerrar.
+  if (salir && state.yo && state.yo.tipo !== 'usuario') salir.hidden = true;
+}
+
+/*
+ * Usuarios: crear, poner contraseña, cambiar rol o quitar acceso.
+ */
+document.addEventListener('submit', async (e) => {
+  const form = e.target;
+  if (!(form instanceof HTMLFormElement)) return;
+  if (form.id !== 'usuario-nuevo' && !form.classList.contains('usuario-clave')) return;
+  e.preventDefault();
+  const datos = Object.fromEntries(new FormData(form));
+  const destino = form.id === 'usuario-nuevo'
+    ? '/api/usuarios'
+    : '/api/usuarios/' + form.dataset.usuario + '/contrasena';
+  try {
+    await api(destino, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(datos),
+    });
+    avisar(form.id === 'usuario-nuevo'
+      ? 'Usuario creado. Al entrar elegirá su contraseña.'
+      : 'Contraseña cambiada. Se cerraron sus sesiones abiertas.');
+    form.reset();
+    refrescar();
+  } catch (err) {
+    avisar(err.message);
+  }
+});
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-usuario][data-cambio]');
+  if (!b) return;
+  const cuerpo = b.dataset.cambio === 'rol'
+    ? { rol: b.dataset.valor }
+    : { activo: b.dataset.valor === 'true' };
+  b.disabled = true;
+  try {
+    await api('/api/usuarios/' + b.dataset.usuario, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cuerpo),
+    });
+    avisar('Hecho.');
+  } catch (err) {
+    avisar(err.message);
+  }
+  refrescar();
+});
+
+cargarYo().then(() => refrescar()).catch((error) => {
   document.getElementById('view').innerHTML =
     '<div class="empty ancho"><b>No se pudo cargar el panel</b>' +
     esc(error.message || 'No hubo respuesta del servidor.') +

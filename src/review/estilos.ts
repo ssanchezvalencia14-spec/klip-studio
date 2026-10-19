@@ -1210,6 +1210,13 @@ ${TOKENS_OSCUROS}
   }
   @media (hover: hover) { #campana:hover { color: var(--text); } }
   #campana[aria-expanded="true"] { color: var(--text); }
+
+  /* Cerrar sesion: el mismo peso que la campana, para no competir con nada. */
+  #salir {
+    color: var(--faint); text-decoration: none;
+    font-size: 17px; line-height: 1; padding: 4px 6px;
+  }
+  @media (hover: hover) { #salir:hover { color: var(--text); } }
   /* El punto no lleva numero: cuantos avisos hay da igual, lo que importa es si
      hay algo sin mirar. Un "3" invita a contarlos en vez de abrirlos. */
   #campana .bolita {

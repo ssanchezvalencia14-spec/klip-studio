@@ -62,6 +62,7 @@ ${CSS}
     <h1 id="title">Inicio</h1>
     <button id="abrir-buscar" aria-label="Buscar" title="Buscar (Ctrl+K)">&#9906;</button>
     <button id="campana" aria-label="Avisos" aria-expanded="false" aria-controls="avisos">&#9737;</button>
+    <a id="salir" href="/logout" aria-label="Cerrar sesión" title="Cerrar sesión">&#10162;</a>
   </div>
   <div class="tabs" id="tabs"></div>
 </header>

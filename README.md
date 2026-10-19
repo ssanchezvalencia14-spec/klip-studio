@@ -42,6 +42,7 @@ npm install
 cp .env.example .env     # y rellena lo que pide
 npm run doctor           # dice qué falta y dónde
 npm run db:setup         # crea las tablas
+npm run crear-admin -- tu@correo.com "Nombre"   # el primer usuario
 npm run review           # abre el panel en http://localhost:4311
 ```
 
@@ -58,7 +59,7 @@ Ninguna clave viaja en el repositorio. Las once que van vacías en
 | `DATABASE_URL` | Postgres (Supabase). Sin esto no arranca nada |
 | `LLM_PROVIDER` | Elegir momentos: `claude-cli` (tu suscripción de Claude, sin clave; ver [docs/IA.md](docs/IA.md)) o `anthropic-api` con `ANTHROPIC_API_KEY` |
 | `UPLOAD_POST_API_KEY` | Publicar en TikTok |
-| `REVIEW_PASSWORD` | La llave del panel cuando se expone a internet |
+| `WORKER_TOKEN` | Opcional: clave de servicio para programas que llamen al panel ([docs/ACCESO.md](docs/ACCESO.md)) |
 | `HOSTINGER_API_TOKEN` | Solo para desplegar. **Da control total de la cuenta** |
 
 Las rutas de `ffmpeg`, `ffprobe` y `yt-dlp` van **absolutas y a mano**. No se

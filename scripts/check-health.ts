@@ -182,64 +182,21 @@ async function ytdlp(): Promise<Resultado> {
 }
 
 async function ia(): Promise<Resultado[]> {
-  const proveedor = optionalEnv('SELECT_PROVIDER') ?? 'anthropic'
-  const salida: Resultado[] = []
-
-  if (proveedor === 'ollama') {
-    const base = optionalEnv('OLLAMA_URL') ?? 'http://localhost:11434'
-    try {
-      const r = await conTiempo(fetch(`${base}/api/tags`))
-      salida.push(r.ok
-        ? { pieza: 'IA (Ollama)', estado: 'ok', detalle: `responde, modelo ${optionalEnv('OLLAMA_MODEL') ?? 'sin elegir'}`, obligatoria: true }
-        : { pieza: 'IA (Ollama)', estado: 'fallo', detalle: `respondió HTTP ${r.status}`, obligatoria: true })
-    } catch (e) {
-      salida.push({ pieza: 'IA (Ollama)', estado: 'fallo', detalle: `no responde: ${limpiar(String(e))}`, obligatoria: true })
-    }
-  } else {
-    const clave = optionalEnv('ANTHROPIC_API_KEY')
-    const modelo = optionalEnv('SELECT_MODEL') ?? 'claude-opus-5-5'
-    if (clave === undefined) {
-      salida.push({ pieza: 'IA (API de Anthropic)', estado: 'sin configurar', detalle: 'falta ANTHROPIC_API_KEY', obligatoria: true })
-    } else {
-      /*
-       * Una llamada minima de verdad, no `models.retrieve`.
-       *
-       * Ese endpoint es gratuito y autentica, pero no dice si la cuenta puede
-       * ejecutar inferencia: una cuenta sin saldo lo pasa y luego falla. Esto
-       * cuesta una fraccion de centimo (1 token de salida).
-       */
-      try {
-        const { default: Anthropic } = await import('@anthropic-ai/sdk')
-        const cliente = new Anthropic({ apiKey: clave, maxRetries: 0, timeout: TIEMPO_MS })
-        await conTiempo(cliente.messages.create({ model: modelo, max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] }))
-        salida.push({ pieza: 'IA (API de Anthropic)', estado: 'ok', detalle: `responde con ${modelo}`, obligatoria: true })
-      } catch (e) {
-        const status = (e as { status?: number }).status
-        const texto = e instanceof Error ? e.message : String(e)
-        const detalle =
-          status === 401 ? 'la clave no vale (401): la API la rechaza' :
-          status === 403 ? 'la clave no tiene permiso para este modelo (403)' :
-          status === 404 ? `el modelo ${modelo} no existe o no hay acceso (404)` :
-          status === 429 ? 'límite de peticiones (429); prueba en unos minutos' :
-          /credit balance/i.test(texto) ? 'la cuenta no tiene saldo' :
-          limpiar(texto)
-        salida.push({ pieza: 'IA (API de Anthropic)', estado: 'fallo', detalle, obligatoria: true })
-      }
-    }
-  }
-
   /*
-   * Claude Code, informativo. La Fase 1 lo convierte en el proveedor principal
-   * (`claude -p` con la suscripcion); hasta entonces solo se dice si esta.
+   * La misma prueba que el boton "Probar IA" del panel (src/llm/probar.ts):
+   * una llamada minima con el proveedor configurado. Con la suscripcion
+   * distingue lista / sin sesion / limite / CLI no encontrado / tiempo agotado.
    */
-  try {
-    const v = await ejecutar(optionalEnv('CLAUDE_CLI_PATH') ?? 'claude', ['--version'])
-    salida.push({ pieza: 'Claude Code (CLI)', estado: 'ok', detalle: limpiar(v.trim()), obligatoria: false })
-  } catch (e) {
-    salida.push({ pieza: 'Claude Code (CLI)', estado: 'aviso', detalle: limpiar(e instanceof Error ? e.message : String(e)), obligatoria: false })
-  }
-
-  return salida
+  const { probarIA } = await import('../src/llm/probar.js')
+  const { textoEstadoIA } = await import('../src/llm/estado.js')
+  const r = await probarIA()
+  const pieza = r.proveedor === 'claude-cli' ? 'IA (suscripción, Claude Code)' : r.proveedor === 'ollama' ? 'IA (Ollama)' : 'IA (API de Anthropic)'
+  const texto = r.estado === 'lista'
+    ? `lista, con ${r.modelo} en ${(r.ms / 1000).toFixed(1)} s`
+    : r.estado === 'error'
+      ? r.mensaje
+      : textoEstadoIA({ estado: r.estado, reanudarEn: r.reanudarEn ?? null })
+  return [{ pieza, estado: r.estado === 'lista' ? 'ok' : 'fallo', detalle: limpiar(texto), obligatoria: true }]
 }
 
 async function uploadPost(): Promise<Resultado> {

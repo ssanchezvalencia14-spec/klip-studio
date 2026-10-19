@@ -106,6 +106,10 @@ export function buildJob(
     case 'doctor':
       return { kind: 'doctor', args: [], label: 'Diagnostico del entorno' }
 
+    // Una llamada minima a la IA desde el PC. El resultado se guarda en ia_estado.
+    case 'probar-ia':
+      return { kind: 'probar-ia', args: [], label: 'Probar IA' }
+
     case 'ingest': {
       const url = requireUrl(params.url)
       /*

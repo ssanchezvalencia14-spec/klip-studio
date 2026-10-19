@@ -10,6 +10,8 @@
   "scripts": {
     "doctor": "tsx scripts/doctor.ts",
     "check-health": "tsx scripts/check-health.ts",
+    "probar-ia": "tsx scripts/probar-ia.ts",
+    "verify:ia": "tsx scripts/verify-ia.ts",
     "ingest": "tsx scripts/ingest.ts",
     "select": "tsx scripts/select.ts",
     "typecheck": "tsc --noEmit",

@@ -2493,4 +2493,28 @@ export const CSS = `  :root {
   .medidor-barra { display: block; height: 8px; border-radius: var(--r-pildora); background: var(--raised); overflow: hidden; }
   .medidor-barra i { display: block; height: 100%; border-radius: inherit; background: var(--ok-texto); }
   @media (max-width: 760px) { .plataformas-fila { grid-template-columns: 1fr; } }
+
+  /* Los radios de "Tipo de video" estan ocultos: sin ancho, no empujan nada. */
+  .tipo { position: relative; }
+  .tipo input { width: 1px; height: 1px; min-height: 0; margin: 0; left: 0; top: 0; }
+  /* El boton de la tarjeta "Siguiente paso" no ocupa toda la fila. */
+  .siguiente .actions .act { flex: none; padding: 0 22px; min-height: var(--alto-control); }
+  @media (max-width: 640px) { .siguiente .actions .act { flex: 1; } }
+
+  /* Filtros de Videos: una sola linea que se desliza, nunca partidos. */
+  .filtros { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .filtros::-webkit-scrollbar { display: none; }
+  .filtros .tab { flex: none; white-space: nowrap; }
+
+  @media (max-width: 640px) {
+    /* El titulo en una linea: si no cabe, se recorta. */
+    #title { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    /* Resumen de la agenda: tres cifras en una fila, compactas. */
+    .resumen-agenda { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); }
+    .resumen-tarjeta { padding: var(--s3); }
+    .resumen-tarjeta .ico-svg { display: none; }
+    .resumen-tarjeta b { font-size: 24px; }
+    .resumen-nombre { font-size: 12px; line-height: 1.3; }
+    .resumen-nota { font-size: 11px; }
+  }
 `

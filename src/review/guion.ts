@@ -3470,7 +3470,9 @@ function render() {
       // El detalle no esta en la lista de vistas de la seccion: su titulo es
       // el del propio video, que es lo que estas mirando.
       ? (state.vod?.title ?? 'Video')
-      : (vistas.length > 1 ? SECCIONES[seccion].titulo + ' / ' + etiqueta : SECCIONES[seccion].titulo);
+      : (vistas.length > 1 && etiqueta !== SECCIONES[seccion].titulo
+          ? SECCIONES[seccion].titulo + ' / ' + etiqueta
+          : SECCIONES[seccion].titulo);
 
   for (const b of document.querySelectorAll('nav button[data-seccion]')) {
     b.setAttribute('aria-current', String(b.dataset.seccion === seccion));
@@ -3780,7 +3782,8 @@ document.addEventListener('click', async e => {
   const vod = e.target.closest('[data-vod]');
   if (vod) { abrirVod(vod.dataset.vod); return; }
 
-  const nav = e.target.closest('nav button[data-seccion]');
+  // Del menu y tambien de 'Mas opciones' (en el movil, Ajustes vive ahi).
+  const nav = e.target.closest('#nav button[data-seccion], #mas button[data-seccion]');
   if (nav) {
     const id = nav.dataset.seccion;
     const vistas = SECCIONES[id].vistas;

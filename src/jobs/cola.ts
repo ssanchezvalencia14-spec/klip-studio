@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../store/db.js'
+import { limpiarRutas } from '../lib/limpiar.js'
 
 /**
  * La cola de tareas, en la base de datos.
@@ -47,6 +48,10 @@ export interface Job {
   exitCode: number | null
   createdAt: string
   endedAt: string | null
+  /** Reintentos automaticos hechos tras fallar (maximo 2). */
+  reintentos: number
+  /** Si espera para reintentarse: no se coge antes de esta hora. */
+  noAntesDe: string | null
 }
 
 /**
@@ -79,6 +84,8 @@ function aJob(r: Record<string, unknown>): Job {
     exitCode: r.exit_code === null ? null : Number(r.exit_code),
     createdAt: new Date(r.created_at as string).toISOString(),
     endedAt: r.ended_at === null ? null : new Date(r.ended_at as string).toISOString(),
+    reintentos: Number(r.reintentos ?? 0),
+    noAntesDe: r.no_antes_de === null || r.no_antes_de === undefined ? null : new Date(r.no_antes_de as string).toISOString(),
   }
 }
 
@@ -116,6 +123,7 @@ export function createCola(db: Db, ownerId: string) {
            select id from jobs
            where owner_id = $1 and status = 'queued'
              and not (kind = any($3::text[]))
+             and (no_antes_de is null or no_antes_de <= now())
            order by created_at
            limit 1
            for update skip locked
@@ -175,7 +183,7 @@ export function createCola(db: Db, ownerId: string) {
       await db.query(
         `update jobs set heartbeat_at = now(), last_line = $2, log = $3
          where id = $1 and owner_id = $4`,
-        [id, ultimaLinea.slice(0, 500), log.slice(-LINEAS_LOG).join('\n'), ownerId],
+        [id, limpiarRutas(ultimaLinea).slice(0, 500), limpiarRutas(log.slice(-LINEAS_LOG).join('\n')), ownerId],
       )
     },
 
@@ -197,7 +205,7 @@ export function createCola(db: Db, ownerId: string) {
       await db.query(
         `update jobs set status = $2, exit_code = $3, ended_at = now(), log = $4, last_line = $5
          where id = $1 and owner_id = $6`,
-        [id, status, exitCode, log.slice(-LINEAS_LOG).join('\n'), ultima.slice(0, 500), ownerId],
+        [id, status, exitCode, limpiarRutas(log.slice(-LINEAS_LOG).join('\n')), limpiarRutas(ultima).slice(0, 500), ownerId],
       )
     },
 
@@ -233,6 +241,42 @@ export function createCola(db: Db, ownerId: string) {
     },
 
     /** Cancela una tarea. Si esta corriendo, el trabajador lo vera al latir. */
+    /**
+     * Fallo, pero se vuelve a intentar dentro de un rato.
+     *
+     * Vuelve a 'queued' con una hora minima: hasta entonces nadie la coge. La
+     * linea que se ve en el panel dice cuando.
+     */
+    async reprogramar(id: string, segundos: number, log: string[], linea: string): Promise<void> {
+      await db.query(
+        `update jobs set status = 'queued', claimed_by = null, ended_at = null,
+           reintentos = reintentos + 1,
+           no_antes_de = now() + make_interval(secs => $2),
+           log = $3, last_line = $4
+         where id = $1 and owner_id = $5`,
+        [id, segundos, limpiarRutas(log.slice(-LINEAS_LOG).join('\n')), linea.slice(0, 500), ownerId],
+      )
+    },
+
+    /**
+     * Al arrancar, lo que este mismo ordenador dejo a medias vuelve a la cola.
+     *
+     * Si el trabajador se reinicia (se cerro, se fue la luz) sus tareas quedan
+     * en 'running' con el nombre del equipo y otro numero de proceso. Ya se
+     * sabe que nadie las esta haciendo: no hace falta esperar los cinco minutos
+     * sin latido de recuperarPerdidas.
+     */
+    async recuperarDeEsteEquipo(equipo: string, yo: string): Promise<number> {
+      const filas = await db.query(
+        `update jobs set status = 'queued', claimed_by = null
+         where owner_id = $1 and status = 'running'
+           and claimed_by like $2 and claimed_by <> $3
+         returning id`,
+        [ownerId, equipo + '-%', yo],
+      )
+      return filas.length
+    },
+
     async cancelar(id: string): Promise<boolean> {
       const filas = await db.query(
         `update jobs set status = 'cancelled', ended_at = now()

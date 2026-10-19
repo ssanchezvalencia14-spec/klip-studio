@@ -32,6 +32,8 @@ import {
   MARCA_ESTADO_IA,
   SALIDA_ESPERA_IA,
 } from '../src/llm/estado.js'
+import { MAX_REINTENTOS, seReintenta } from '../src/jobs/reintentos.js'
+import { createSistema } from '../src/jobs/sistema.js'
 
 loadEnv()
 
@@ -44,12 +46,22 @@ const INTERVALO_MS = 5_000
 /** Cada cuanto se da señal de vida mientras se trabaja. */
 const LATIDO_MS = 15_000
 
+/*
+ * Cada cuanto dice el PC "sigo aqui", haga lo que haga.
+ *
+ * Antes solo latia entre tarea y tarea: durante un render de veinte minutos el
+ * panel lo daba por desconectado. Ahora late con su propio reloj, tambien
+ * mientras trabaja.
+ */
+const LATIDO_TRABAJADOR_MS = 30_000
+
 /** Identidad de este trabajador. Sirve para saber quien cogio que. */
 const YO = `${hostname()}-${process.pid}`
 
 const db = await connect(requireEnv('DATABASE_URL'))
 const cola = createCola(db, OWNER)
 const estadoIA = createEstadoIA(db, OWNER)
+const sistema = createSistema(db, OWNER)
 
 let parando = false
 let actual: ChildProcess | null = null
@@ -73,9 +85,19 @@ async function ejecutar(job: Job): Promise<'ok' | 'error' | 'cancelled' | 'en_es
   let ultima = ''
   let cancelada = false
 
+  /*
+   * El navegador de cookies para yt-dlp se elige en el panel (Ajustes,
+   * Sistema). Si esta en el .env, manda el .env, como con el resto.
+   */
+  const env = { ...process.env }
+  if (job.kind === 'ingest' && env.YTDLP_COOKIES_FROM_BROWSER === undefined) {
+    const { ytdlpCookies } = await sistema.ajustes().catch(() => ({ ytdlpCookies: '' }))
+    if (ytdlpCookies !== '') env.YTDLP_COOKIES_FROM_BROWSER = ytdlpCookies
+  }
+
   const hijo = spawn(process.execPath, [TSX, `scripts/${job.kind}.ts`, ...job.args], {
     cwd: ROOT,
-    env: process.env,
+    env,
     windowsHide: true,
   })
   actual = hijo
@@ -142,6 +164,19 @@ async function ejecutar(job: Job): Promise<'ok' | 'error' | 'cancelled' | 'en_es
   }
 
   const estado = cancelada ? 'cancelled' : codigo === 0 ? 'ok' : 'error'
+
+  if (estado === 'error') {
+    const espera = seReintenta(job.kind, codigo, job.reintentos)
+    if (espera !== null) {
+      const hora = new Date(Date.now() + espera * 1000)
+      const hh = String(hora.getHours()).padStart(2, '0') + ':' + String(hora.getMinutes()).padStart(2, '0')
+      const linea = `Falló; se reintenta sola a las ${hh} (intento ${job.reintentos + 1} de ${MAX_REINTENTOS}).`
+      await cola.reprogramar(job.id, espera, lineas, linea)
+      log.warn(`${job.id} -> fallo, reintento ${job.reintentos + 1} de ${MAX_REINTENTOS} en ${espera} s`)
+      return 'error'
+    }
+  }
+
   await cola.terminar(job.id, estado, codigo, lineas)
   log.info(`${job.id} -> ${estado}`)
 
@@ -205,6 +240,20 @@ for (const señal of ['SIGINT', 'SIGTERM'] as const) {
 
 log.info(`Trabajador ${YO} en marcha. Preguntando cada ${INTERVALO_MS / 1000}s.`)
 
+const latidoPropio = setInterval(() => {
+  void cola.latirTrabajador(YO).catch((e: unknown) => log.error('No se pudo latir', e))
+}, LATIDO_TRABAJADOR_MS)
+await cola.latirTrabajador(YO).catch(() => {})
+
+/*
+ * Lo que este mismo PC dejo a medias (se cerro, se fue la luz) vuelve a la
+ * cola en el acto: no hace falta esperar los cinco minutos sin latido.
+ */
+{
+  const recuperadas = await cola.recuperarDeEsteEquipo(hostname(), YO).catch(() => 0)
+  if (recuperadas > 0) log.warn(`${recuperadas} tarea(s) que quedaron a medias vuelven a la cola.`)
+}
+
 let ocioso = 0
 while (!parando) {
   try {
@@ -238,6 +287,8 @@ while (!parando) {
       // intervalo serian 720 lineas por hora sin decir nada nuevo.
       ocioso += 1
       if (ocioso % 60 === 1) log.info('Sin trabajo pendiente.')
+      // yt-dlp, disco y retencion: cada cosa a su ritmo (semanal, media hora, diario).
+      if (ocioso % 12 === 1) await sistema.mantenimiento()
       await dormir(INTERVALO_MS)
       continue
     }
@@ -251,5 +302,6 @@ while (!parando) {
   }
 }
 
+clearInterval(latidoPropio)
 await db.close()
 log.info('Trabajador detenido.')

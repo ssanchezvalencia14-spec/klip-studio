@@ -14,6 +14,7 @@ import { formatDuration } from '../src/lib/logger.js'
 import { beginRun } from '../src/store/runs.js'
 import { selectClips } from '../src/select/select.js'
 import { MARCA_ESPERA_IA, MARCA_ESTADO_IA, SALIDA_ESPERA_IA } from '../src/llm/estado.js'
+import { SALIDA_NO_REINTENTAR } from '../src/jobs/reintentos.js'
 import type { SourceMeta, Transcript } from '../src/types.js'
 
 function formatTimestamp(seconds: number): string {
@@ -204,7 +205,9 @@ async function main(): Promise<void> {
       console.error('Si fue por saldo de la API y el video es musica, en su ficha tienes el')
       console.error('boton "Es musica: buscar estribillos", que no gasta saldo.')
     }
-    process.exitCode = 1
+    // Un fallo definitivo (clave, saldo, respuesta ilegible tras reintentar)
+    // no se arregla insistiendo: el trabajador no lo reintenta.
+    process.exitCode = result.motivoCorte?.definitivo === true ? SALIDA_NO_REINTENTAR : 1
     return
   }
 

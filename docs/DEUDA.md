@@ -40,14 +40,14 @@ Hay que rotar igual:
 
 | # | Riesgo | Dónde | Fase |
 |---|---|---|---|
-| M1 | **Rutas absolutas de Windows obligatorias** para ffmpeg, ffprobe y yt-dlp (`.env.example` trae `C:\Users\TU-USUARIO\...\WinGet\...`). Impide mover el trabajador a un VPS sin tocar la configuración. Se hizo a propósito (hay dos ffmpeg en el PATH), pero falta una opción por PATH | `src/lib/env.ts` (`bin`) | 4 |
-| M2 | **`.claude/settings.json` (versionado) tiene la ruta del usuario de Windows de quien lo escribió** (`C:/Users/<otro-usuario>/.local/bin/graphify.EXE`) en dos hooks. En cualquier otra PC el hook falla en cada lectura y búsqueda del agente | `.claude/settings.json` | 4 |
-| M3 | **`doctor.ts` arma rutas con `\\`** (`${ROOT}\\.env`). Solo funciona en Windows | `scripts/doctor.ts:52` | 4 |
+| M1 | ~~Resuelto en Fase 4~~ (por configuracion o PATH). **Rutas absolutas de Windows obligatorias** para ffmpeg, ffprobe y yt-dlp (`.env.example` trae `C:\Users\TU-USUARIO\...\WinGet\...`). Impide mover el trabajador a un VPS sin tocar la configuración. Se hizo a propósito (hay dos ffmpeg en el PATH), pero falta una opción por PATH | `src/lib/env.ts` (`bin`) | 4 |
+| M2 | ~~Resuelto en Fase 4~~. **`.claude/settings.json` (versionado) tiene la ruta del usuario de Windows de quien lo escribió** (`C:/Users/<otro-usuario>/.local/bin/graphify.EXE`) en dos hooks. En cualquier otra PC el hook falla en cada lectura y búsqueda del agente | `.claude/settings.json` | 4 |
+| M3 | ~~Resuelto en Fase 4~~. **`doctor.ts` arma rutas con `\\`** (`${ROOT}\\.env`). Solo funciona en Windows | `scripts/doctor.ts:52` | 4 |
 | M4 | **`.env.example` está incompleto**: faltan `DATABASE_URL`, `REVIEW_KEY`, `REVIEW_PASSWORD`, `REVIEW_ALLOW_OPEN`, `PANEL_REMOTO`, `PORT`, `AUTO_CHAIN`, `OWNER_EMAIL`, `HOSTINGER_API_TOKEN`, `SELECT_PROVIDER`, `NVENC_PRESET`, `NVENC_CQ`, `BLUR_SIGMA`, `SUBTITLE_SIZE`, `SUBTITLE_FONT`. El README dice que `DATABASE_URL` está ahí y no lo está. Quien clona no sabe qué pedir | `.env.example` | 1 (lo que toque) y 8 |
 | M5 | **Sin pruebas automáticas reales.** Hay ~25 scripts `verify:*` sueltos, sin runner ni CI, y hay que lanzarlos uno a uno. README: `verify:db` falla 2 de 8 "y es conocido" | `scripts/verify-*.ts` | 5 y 8 |
 | M6 | **Dos almacenes y uno muerto.** `src/store/store.ts` (fichero) sin uso desde 2026-09-13; el vivo es `pg.ts`. Leer del equivocado no avisa | `src/store/` | 8 |
 | M7 | **Archivos enormes para la interfaz**: `guion.ts` 5131 líneas, `server.ts` 2397, `estilos.ts` 2203. Una comilla invertida rompe la página entera | `src/review/` | 3 |
-| M8 | **Sin almacenamiento acotado**: los másteres (~30 MB por clip) y los VOD se quedan en `out/` y `work/` para siempre. No hay aviso de disco | `out/`, `work/` | 4 |
+| M8 | ~~Resuelto en Fase 4~~ (retencion configurable, aviso de disco, techo de bitrate). **Sin almacenamiento acotado**: los másteres (~30 MB por clip) y los VOD se quedan en `out/` y `work/` para siempre. No hay aviso de disco | `out/`, `work/` | 4 |
 | M9 | **Un solo dueño fijo en el código** (`OWNER_ID = 1111...`). El modelo de datos tiene `owner_id`, pero nada lo usa de verdad | `src/lib/owner.ts` | 2 y 7 |
 | M10 | **Topes de cuentas cosidos al texto** ("20 cuentas", "25 perfiles") en documentos y en partes del panel | varios | 5 y 7 |
 | M11 | **Sigue abierto tras la Fase 1.** **La IA de los pies de texto también usa la API de pago.** Si solo se cambia "Elegir momentos" a la suscripción, `variants` sigue dando 401 o cae a una variación detectable | `src/variants/captions.ts` | 1 |
@@ -59,7 +59,7 @@ Hay que rotar igual:
 | B1 | Comentarios y textos de consola sin tildes ("Verificacion", "publicacion") | todo `src/` y `scripts/` | 5 (solo los visibles) |
 | B2 | `package.json` se llama `tiktok-clipper` y no `klip-studio` | `package.json` | 8 |
 | B3 | Ollama queda como interruptor y su calidad está medida como mala. Es código vivo que nadie debería elegir | `src/select/provider.ts` | 1 |
-| B4 | Nada vigila que yt-dlp esté al día, y una versión vieja falla con 403 que parece un bloqueo (`CONTEXT.md` §6c) | — | 4 |
+| B4 | ~~Resuelto en Fase 4~~ (comprobacion semanal). Nada vigila que yt-dlp esté al día, y una versión vieja falla con 403 que parece un bloqueo (`CONTEXT.md` §6c) | — | 4 |
 
 ---
 

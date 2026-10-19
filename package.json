@@ -14,6 +14,7 @@
     "verify:ia": "tsx scripts/verify-ia.ts",
     "crear-admin": "tsx scripts/crear-admin.ts",
     "verify:acceso": "tsx scripts/verify-acceso.ts",
+    "verify:procesador": "tsx scripts/verify-procesador.ts",
     "ingest": "tsx scripts/ingest.ts",
     "select": "tsx scripts/select.ts",
     "typecheck": "tsc --noEmit",

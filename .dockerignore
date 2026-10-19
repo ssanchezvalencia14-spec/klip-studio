@@ -1,0 +1,15 @@
+node_modules
+dist
+work
+out
+models
+logs
+state
+archivo
+.env
+.env.*
+.git
+.claude
+graphify-out
+klip-deploy.zip
+docs/capturas

@@ -2,6 +2,7 @@ import { openAsBlob, statSync } from 'node:fs'
 import { basename } from 'node:path'
 import { createLogger } from '../../lib/logger.js'
 import type { PublishProvider, PublishRequest, PublishResult } from '../types.js'
+import { construirTexto } from '../texto.js'
 
 const log = createLogger('upload-post')
 
@@ -53,7 +54,7 @@ export class UploadPostProvider implements PublishProvider {
      * para que una llamada suelta siga funcionando.
      */
     const title =
-      request.texto ?? [caption, ...hashtags.map((h) => '#' + h)].join(' ').slice(0, 2200)
+      request.texto ?? construirTexto({ caption, hashtags, plantilla: '{titulo} {hashtags}', fijos: '' })
 
     const form = new FormData()
     form.append('user', accountId)

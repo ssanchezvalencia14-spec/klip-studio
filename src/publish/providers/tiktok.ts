@@ -1,6 +1,7 @@
 import { openAsBlob, statSync } from 'node:fs'
 import { createLogger } from '../../lib/logger.js'
 import type { PublishProvider, PublishRequest, PublishResult } from '../types.js'
+import { construirTexto } from '../texto.js'
 import type { Tokens } from '../tiktok/tokens.js'
 import { PermisoCaducado, SinPermiso } from '../tiktok/tokens.js'
 
@@ -281,7 +282,7 @@ export class TikTokProvider implements PublishProvider {
      * para que una llamada suelta siga funcionando.
      */
     const title =
-      request.texto ?? [caption, ...hashtags.map((h) => '#' + h)].join(' ').slice(0, 2200)
+      request.texto ?? construirTexto({ caption, hashtags, plantilla: '{titulo} {hashtags}', fijos: '' })
 
     /*
      * `draft` y `direct` son dos endpoints distintos, no un parametro.

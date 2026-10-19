@@ -1530,7 +1530,7 @@ function renderTabs() {
   const tabs = [
     ['pending', 'Pendientes'],
     ['approved', 'Aprobados'],
-    ['rejected', 'Rechazados'],
+    ['rejected', 'Descartados'],
   ];
   document.getElementById('tabs').innerHTML = tabs.map(([key, label]) =>
     '<button class="tab" role="tab" aria-selected="' + (state.filter === key) + '" data-filter="' + key + '">' +
@@ -1538,149 +1538,291 @@ function renderTabs() {
   ).join('');
 }
 
-function renderCard(c) {
-  const over = c.caption.length > 150;
+/*
+ * FASE 3: Revisar en tres zonas.
+ *
+ * A la izquierda la cola, en el centro el clip en vertical y a la derecha lo
+ * que hay que decidir. Antes era una rejilla de tarjetas enormes, cada una con
+ * su video y sus campos: para decidir el clip diez habia que bajar nueve
+ * pantallas.
+ *
+ * Los elementos de la cola son los ".card[data-clip]" de ".lista-clips", asi
+ * que la seleccion en lote, la barra de lote y las flechas siguen funcionando
+ * como antes. El clip abierto es el de state.foco. El detalle es OTRA
+ * ".card" con los mismos datos, y es la que lleva la descripcion, las
+ * etiquetas y el corte: decide() la lee de ahi.
+ */
+function itemCola(c, i) {
   const marcada = state.sel.has(llaveClip(c.sourceId, c.clipId));
-  return '<article class="card' + (marcada ? ' elegida' : '') + '"' +
+  const activo = i === Math.min(state.foco, state.clips.length - 1);
+  return '<div class="card item-clip' + (marcada ? ' elegida' : '') + (activo ? ' activo' : '') + '"' +
     ' data-source="' + esc(c.sourceId) + '" data-clip="' + esc(c.clipId) + '"' +
-    // Los limites originales: con ellos se sabe si el corte cambio y se
-    // traduce el instante del reproductor a segundos del VOD.
     ' data-start="' + c.start + '" data-end="' + c.end + '">' +
-    /*
-     * La casilla va ENCIMA del video, arriba a la izquierda.
-     *
-     * No cabe en el cuerpo de la tarjeta: para marcar diez clips habria que
-     * bajar a los botones de cada uno, y el gesto de marcar en serie solo
-     * compensa si las casillas estan todas a la misma altura, que es la de la
-     * esquina de la miniatura.
-     */
-    '<label class="elegir">' +
-      '<input type="checkbox"' + (marcada ? ' checked' : '') +
-      ' aria-label="Marcar ' + esc(c.clipId) + ' para decidir en lote">' +
-    '</label>' +
-    // El src NO se pone aqui. Se asigna cuando la tarjeta entra en pantalla.
-    // Con seis videos de 30 MB, pedir metadatos de todos a la vez satura la
-    // conexion del movil antes de que se vea el primero.
-    // Sin video, el motivo importa: no es lo mismo que falte el render que que
-    // falte subirlo, y la segunda se arregla con un boton en Inicio.
-    (c.hasFile
-      ? '<video controls preload="none" playsinline data-src="/video/' +
-          encodeURIComponent(c.sourceId) + '/' + encodeURIComponent(c.clipId) + '"></video>'
-      : '<div class="warn" style="margin:14px">' +
-          (c.masterPath
-            ? 'Este video existe pero no esta subido. En el ordenador que los crea, ' +
-              'entra en Inicio y pulsa "Subir para revisar".'
-            : 'Falta el archivo renderizado de este clip.') +
-        '</div>') +
-    '<div class="body">' +
-      '<div class="meta">' +
-        '<span>' + esc(c.clipId) + '</span>' +
-        '<span>' + fmt(c.start) + ' - ' + fmt(c.end) + '</span>' +
-        '<span>' + c.durationSec + 's</span>' +
-        '<span class="score' + (c.score >= 60 ? ' alto' : '') + '">' + c.score + '</span>' +
-      '</div>' +
-      '<p class="hook">' + esc(c.hook) + '</p>' +
-      (c.reason ? '<p class="reason">' + esc(c.reason) + '</p>' : '') +
-      '<div class="field">' +
-        '<label>Descripcion del video</label>' +
-        '<textarea rows="2" class="caption">' + esc(c.caption) + '</textarea>' +
-        '<div class="count' + (over ? ' over' : '') + '">' + c.caption.length + ' / 150</div>' +
-      '</div>' +
-      '<div class="field">' +
-        '<label>Etiquetas</label>' +
-        '<input class="tags" value="' + esc(c.hashtags.join(', ')) + '">' +
-      '</div>' +
-      /*
-       * El recorte va plegado, y no sale en el panel remoto.
-       *
-       * Plegado porque la mayoria de los momentos salen bien cortados y la
-       * decision es aprobar o descartar. Dejar seis controles mas abiertos en
-       * cada una de las cuarenta y cinco tarjetas convertiria la pantalla de
-       * decidir en una de editar, que es lo contrario de lo que hace falta.
-       *
-       * Y no sale en el remoto porque rehacer un clip necesita el MP4 del
-       * directo y la tarjeta grafica, y en Hostinger no hay ninguna de las
-       * dos: el servidor rechaza esa tarea con un 501. Enseñar un boton que
-       * siempre contesta "hazlo en el otro ordenador" es peor que no
-       * enseñarlo, porque hay que pulsarlo para enterarse.
-       */
-      (state.overview?.remoto ? '' :
-      '<details class="corte">' +
-        '<summary>Ajustar el corte</summary>' +
-        '<p class="reason" style="margin:var(--s2) 0">Pon el video donde quieras que ' +
-          'empiece o acabe y pulsa el boton de al lado. Los segundos son del video largo.</p>' +
-        '<div class="corte-fila">' +
-          '<label>Empieza en' +
-            '<input type="number" class="corte-ini" step="0.1" min="0" value="' + c.start + '">' +
-          '</label>' +
-          '<button class="chip" data-marcar="ini">Empieza aqui</button>' +
-        '</div>' +
-        '<div class="corte-fila">' +
-          '<label>Acaba en' +
-            '<input type="number" class="corte-fin" step="0.1" min="0" value="' + c.end + '">' +
-          '</label>' +
-          '<button class="chip" data-marcar="fin">Acaba aqui</button>' +
-        '</div>' +
-        '<p class="corte-aviso">Sin cambios.</p>' +
-        '<div class="chips">' +
-          '<button class="chip" data-corte-reset>Dejarlo como estaba</button>' +
-          '<button class="chip primario" data-rehacer disabled>Rehacer este video</button>' +
-        '</div>' +
-        '<p class="reason" style="margin:var(--s2) 0 0">Rehacerlo lo devuelve a ' +
-          'pendientes: lo que apruebes tiene que ser lo que se publica.</p>' +
-      '</details>') +
+    '<label class="elegir"><input type="checkbox"' + (marcada ? ' checked' : '') +
+      ' aria-label="Marcar ' + esc(c.clipId) + ' para decidir en lote"></label>' +
+    '<button class="item-abrir" data-ver-clip="' + i + '"' + (activo ? ' aria-current="true"' : '') + '>' +
+      '<span class="item-mini dato">' + c.durationSec + 's</span>' +
+      '<span class="item-texto">' +
+        '<span class="item-titulo">' + esc(c.hook) + '</span>' +
+        '<span class="item-meta dato">' + fmt(c.start) + ' · ' + esc(c.clipId) + '</span>' +
+      '</span>' +
+      '<span class="puntaje' + (c.score >= 60 ? ' alto' : '') + ' dato" title="Puntaje">' + c.score + '</span>' +
+    '</button>' +
+  '</div>';
+}
 
-      '<div class="actions">' +
-        (state.filter === 'pending'
-          ? '<button class="act reject" data-do="rejected">Descartar</button>' +
-            '<button class="act approve" data-do="approved">Aprobar</button>'
-          : '<button class="act undo" data-do="pending">Devolver a pendientes</button>') +
-      '</div>' +
+function detalleClip(c) {
+  const over = c.caption.length > 150;
+  const pendiente = state.filter === 'pending';
+  return '<section class="card detalle-clip" aria-label="Detalle del clip"' +
+    ' data-source="' + esc(c.sourceId) + '" data-clip="' + esc(c.clipId) + '"' +
+    ' data-start="' + c.start + '" data-end="' + c.end + '"><div class="body">' +
+    '<p class="ante">Clip <span class="dato">' + esc(c.clipId) + '</span></p>' +
+    '<h2 class="detalle-titulo">' + esc(c.hook) + '</h2>' +
+    '<div class="rango">' +
+      '<span>' + ico('reloj') + '<span class="dato">' + fmt(c.start) + ' – ' + fmt(c.end) + '</span></span>' +
+      '<span class="dato">' + c.durationSec + ' s</span>' +
+      (c.durationSec > 60 ? '<span class="estado-chip aviso">Más de 60 s</span>' : '') +
     '</div>' +
-  '</article>';
+    '<div class="puntaje-grande">' +
+      '<div class="puntaje-cab"><span>Puntaje</span><b class="dato">' + c.score + '<small>/100</small></b></div>' +
+      '<span class="puntaje-barra"><i style="width:' + Math.max(0, Math.min(100, c.score)) + '%"></i></span>' +
+    '</div>' +
+    (c.reason ? '<p class="motivo"><b>Por qué:</b> ' + esc(c.reason) + '</p>' : '') +
+    '<div class="field">' +
+      '<label for="caption-' + esc(c.clipId) + '">Descripción del clip</label>' +
+      '<textarea id="caption-' + esc(c.clipId) + '" rows="3" class="caption">' + esc(c.caption) + '</textarea>' +
+      '<div class="count' + (over ? ' over' : '') + '">' + c.caption.length + ' / 150</div>' +
+    '</div>' +
+    '<div class="field">' +
+      '<label for="tags-' + esc(c.clipId) + '">Etiquetas</label>' +
+      '<input id="tags-' + esc(c.clipId) + '" class="tags" value="' + esc(c.hashtags.join(', ')) + '">' +
+    '</div>' +
+    (state.overview?.remoto ? '' :
+    '<details class="corte">' +
+      '<summary>Ajustar inicio y fin</summary>' +
+      '<div class="linea-corte" aria-hidden="true"><span style="left:0;right:0"></span></div>' +
+      '<div class="corte-fila"><label>Empieza en' +
+        '<input type="number" class="corte-ini" step="0.1" min="0" value="' + c.start + '"></label>' +
+        '<button class="chip" data-marcar="ini">Empieza aquí</button></div>' +
+      '<div class="corte-fila"><label>Acaba en' +
+        '<input type="number" class="corte-fin" step="0.1" min="0" value="' + c.end + '"></label>' +
+        '<button class="chip" data-marcar="fin">Acaba aquí</button></div>' +
+      '<p class="corte-aviso">Sin cambios.</p>' +
+      '<div class="chips">' +
+        '<button class="chip" data-corte-reset>Dejarlo como estaba</button>' +
+        '<button class="chip primario" data-rehacer disabled>Volver a armar este clip</button>' +
+      '</div>' +
+    '</details>') +
+    '<div class="decidir">' +
+      (pendiente
+        ? '<button class="act reject" data-do="rejected">' + ico('cerrar') + 'Descartar <kbd>R</kbd></button>' +
+          '<button class="act approve" data-do="approved">' + ico('hecho') + 'Aprobar y siguiente <kbd>A</kbd></button>'
+        : '<button class="act undo" data-do="pending">' + ico('reintentar') + 'Devolver a pendientes</button>') +
+    '</div>' +
+    '<p class="atajos">' +
+      '<kbd>↑</kbd><kbd>↓</kbd> cambiar de clip · <kbd>Espacio</kbd> reproducir · <kbd>X</kbd> marcar' +
+    '</p>' +
+  '</div></section>';
+}
+
+function reproductorClip(c) {
+  return '<section class="reproductor" aria-label="Vista previa del clip">' +
+    '<div class="marco-vertical">' +
+      (c.hasFile
+        ? '<video id="video-clip" controls playsinline preload="metadata" src="/video/' +
+            encodeURIComponent(c.sourceId) + '/' + encodeURIComponent(c.clipId) + '"></video>'
+        : '<div class="sin-video">' + ico('videos') +
+            '<p>' + (c.masterPath
+              ? 'Este clip está armado pero todavía no se subió para revisarlo.'
+              : 'Falta el archivo de este clip.') + '</p></div>') +
+    '</div>' +
+  '</section>';
 }
 
 function vistaClips() {
   const labels = { pending: 'por revisar', approved: 'aprobado', rejected: 'descartado' };
   if (state.clips.length === 0) {
-    // Cada filtro vacio significa algo distinto y merece su propia frase. "Nada
-    // por aqui" en los tres casos no ayuda: en pendientes puede ser que hayas
-    // terminado, y eso es una buena noticia, no un vacio.
     const vacios = {
-      pending: ['Todo revisado', 'No queda ningun video esperando tu decision.'],
-      approved: ['Aun no has aprobado nada', 'Los que apruebes apareceran aqui listos para repartir.'],
-      rejected: ['Nada descartado', 'Los videos que rechaces se guardan aqui por si cambias de idea.'],
+      pending: ['Todo revisado', 'No queda ningún clip esperando tu decisión.', ['videos', 'Añadir otro video']],
+      approved: ['Aún no has aprobado nada', 'Los clips que apruebes aparecen aquí y pasan solos a la agenda.', null],
+      rejected: ['Nada descartado', 'Los clips que descartes se guardan aquí por si cambias de idea.', null],
     };
-    const [titulo, sub] = vacios[state.filter] ?? ['Nada por aqui', 'No hay ningun video ' + labels[state.filter] + '.'];
-    return '<div class="empty"><b>' + titulo + '</b>' + sub + '</div>';
+    const [titulo, sub, accion] = vacios[state.filter] ?? ['Nada por aquí', 'No hay ningún clip ' + labels[state.filter] + '.', null];
+    return '<div class="empty"><b>' + titulo + '</b>' + sub +
+      (accion ? '<div class="actions" style="justify-content:center;margin-top:var(--s4)">' +
+        '<button class="act go" data-ir="' + accion[0] + '">' + accion[1] + '</button></div>' : '') +
+      '</div>';
   }
-  /*
-   * La barra de lote se pinta siempre y se esconde con hidden.
-   *
-   * Si se creara al marcar el primero, aparecer y desaparecer movería la
-   * pagina entera cada vez que la seleccion pasa por cero, justo mientras
-   * estas pulsando. Existiendo desde el principio, solo cambia de visible.
-   */
-  const barra = '<div id="lote" class="lote ancho" role="region" aria-label="Decidir varios" hidden>' +
+
+  if (state.foco >= state.clips.length) state.foco = state.clips.length - 1;
+  if (state.foco < 0) state.foco = 0;
+  const actual = state.clips[state.foco];
+
+  const barra = '<div id="lote" class="lote" role="region" aria-label="Decidir varios" hidden>' +
     '<span class="cuantos"></span>' +
-    /*
-     * Un solo boton para la seleccion, no dos.
-     *
-     * "Marcar todos" y "Quitar la marca" son el mismo gesto en dos
-     * direcciones, y teniendo los dos la barra no cabia en una linea: el
-     * boton de aprobar se iba solo a una segunda fila, separado de descartar,
-     * que es la pareja que tiene que verse junta para no confundirlos.
-     */
     '<button class="chip" data-marca>Marcar todos</button>' +
     '<span class="hueco"></span>' +
     '<button class="chip" data-lote="rejected">Descartar</button>' +
     '<button class="chip primario" data-lote="approved">Aprobar</button>' +
   '</div>';
 
-  // El contenedor lleva la cascada: las tarjetas entran escalonadas en vez de
-  // aparecer las treinta de golpe.
-  return barra + '<div class="cascada lista-clips">' + state.clips.map(renderCard).join('') + '</div>';
+  return '<div class="revisar">' +
+    '<aside class="cola-revisar" aria-label="Cola de clips">' +
+      '<p class="ante">' + plural(state.clips.length, 'clip') + ' ' +
+        ({ pending: 'por revisar', approved: state.clips.length === 1 ? 'aprobado' : 'aprobados',
+           rejected: state.clips.length === 1 ? 'descartado' : 'descartados' })[state.filter] + '</p>' +
+      barra +
+      '<div class="lista-clips">' + state.clips.map(itemCola).join('') + '</div>' +
+    '</aside>' +
+    reproductorClip(actual) +
+    detalleClip(actual) +
+  '</div>';
 }
+
+/** El detalle (con la descripcion y las etiquetas) del clip abierto. */
+function detalleAbierto() {
+  return document.querySelector('.detalle-clip');
+}
+
+/** Abre otro clip de la cola. */
+function abrirClip(i, conTeclado) {
+  if (state.clips.length === 0) return;
+  state.foco = Math.min(state.clips.length - 1, Math.max(0, i));
+  if (conTeclado !== undefined) state.conTeclado = conTeclado;
+  render();
+  const item = document.querySelectorAll('.lista-clips .item-clip')[state.foco];
+  item?.scrollIntoView({ block: 'nearest', behavior: comoDesplazar() });
+}
+
+/*
+ * Aprobar o descartar, con insignia, siguiente y "Deshacer" durante 5 s.
+ *
+ * La insignia confirma la decision antes de que llegue la respuesta. Al
+ * refrescar, el clip decidido sale de la lista de pendientes y el mismo
+ * indice pasa a ser el siguiente: "aprobar y siguiente" no necesita mas.
+ */
+async function decidirClip(status) {
+  const card = detalleAbierto();
+  if (!card || card.dataset.decidiendo) return;
+  card.dataset.decidiendo = '1';
+  const sourceId = card.dataset.source;
+  const clipId = card.dataset.clip;
+  const marco = document.querySelector('.marco-vertical');
+  if (marco && status !== 'pending') {
+    const insignia = document.createElement('span');
+    insignia.className = 'insignia ' + (status === 'approved' ? 'ok' : 'no');
+    insignia.innerHTML = ico(status === 'approved' ? 'hecho' : 'cerrar') +
+      (status === 'approved' ? 'Aprobado' : 'Descartado');
+    marco.appendChild(insignia);
+  }
+  document.getElementById('video-clip')?.pause();
+  const caption = card.querySelector('.caption')?.value ?? '';
+  const tags = (card.querySelector('.tags')?.value ?? '')
+    .split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+  try {
+    await api('/api/clips/' + encodeURIComponent(sourceId) + '/' + encodeURIComponent(clipId), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status, caption, hashtags: tags }),
+    });
+  } catch (err) {
+    avisar(err.message);
+    delete card.dataset.decidiendo;
+    return;
+  }
+  if (status !== 'pending') {
+    avisarConDeshacer(status === 'approved' ? 'Clip aprobado.' : 'Clip descartado.', async () => {
+      await api('/api/clips/' + encodeURIComponent(sourceId) + '/' + encodeURIComponent(clipId), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'pending', caption, hashtags: tags }),
+      });
+      avisar('Deshecho. El clip vuelve a pendientes.');
+      refrescar();
+    });
+  }
+  setTimeout(refrescar, 320);
+}
+
+/** Un aviso con un boton "Deshacer" que dura 5 segundos. */
+function avisarConDeshacer(texto, deshacer) {
+  document.getElementById('aviso')?.remove();
+  const el = document.createElement('div');
+  el.id = 'aviso';
+  el.className = 'con-accion';
+  el.setAttribute('role', 'status');
+  const t = document.createElement('span');
+  t.textContent = texto;
+  const b = document.createElement('button');
+  b.textContent = 'Deshacer';
+  b.className = 'aviso-boton';
+  let hecho = false;
+  b.addEventListener('click', async () => {
+    if (hecho) return;
+    hecho = true;
+    el.remove();
+    await deshacer();
+  });
+  el.append(t, b);
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('sale');
+    setTimeout(() => el.remove(), 200);
+  }, 5000);
+}
+
+document.addEventListener('click', e => {
+  if (state.view !== 'clips') return;
+  const abrir = e.target.closest('[data-ver-clip]');
+  if (abrir) { abrirClip(Number(abrir.dataset.verClip), false); return; }
+}, true);
+
+/*
+ * Atajos de Revisar. Fuera de los campos de texto:
+ *   A aprobar y siguiente, R descartar, flechas cambiar de clip,
+ *   Espacio reproducir o pausar, X marcar para el lote, Esc quitar marcas.
+ */
+document.addEventListener('keydown', e => {
+  if (state.view !== 'clips') return;
+  if (e.target.matches?.('textarea, input, select')) return;
+  if (buscador.abierto) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'j') { e.preventDefault(); abrirClip(state.foco + 1, true); return; }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); abrirClip(state.foco - 1, true); return; }
+
+  if (e.key === 'Escape' && state.sel.size > 0) {
+    e.preventDefault();
+    state.sel.clear();
+    pintarSeleccion();
+    return;
+  }
+
+  if (e.key === ' ') {
+    // Si el foco esta en un boton, el espacio lo pulsa; si no, reproduce.
+    if (e.target.matches?.('button, a, summary, [role="button"]')) return;
+    e.preventDefault();
+    const v = document.getElementById('video-clip');
+    if (v) { if (v.paused) v.play(); else v.pause(); }
+    return;
+  }
+
+  const item = tarjetaEnFoco();
+  if ((e.key === 'x' || e.key === 'X') && item) {
+    e.preventDefault();
+    state.conTeclado = true;
+    elegir(item);
+    return;
+  }
+
+  if (e.key !== 'a' && e.key !== 'A' && e.key !== 'r' && e.key !== 'R') return;
+  if (state.filter !== 'pending') return;
+  e.preventDefault();
+  const status = (e.key === 'a' || e.key === 'A') ? 'approved' : 'rejected';
+  if (state.sel.size > 0) { decidirLote(status); return; }
+  decidirClip(status);
+});
 
 // --- Vista: cola ----------------------------------------------------------
 
@@ -3820,7 +3962,11 @@ document.addEventListener('click', async e => {
   }
 
   const btn = e.target.closest('[data-do]');
-  if (btn) { decide(btn.closest('.card'), btn.dataset.do); return; }
+  if (btn) {
+    if (btn.closest('.detalle-clip')) decidirClip(btn.dataset.do);
+    else decide(btn.closest('.card'), btn.dataset.do);
+    return;
+  }
 
   const log = e.target.closest('[data-log]');
   if (log) {
@@ -4847,55 +4993,7 @@ document.addEventListener('click', e => {
   }
 });
 
-document.addEventListener('keydown', e => {
-  if (state.view !== 'clips') return;
-  /*
-   * Dentro de un campo de texto las letras son letras.
-   *
-   * El interrogante no sobra: el objetivo de un keydown puede ser el propio
-   * documento cuando no hay nada enfocado, y document no tiene matches(). Sin
-   * el, ese caso lanza y se come el resto del manejador.
-   */
-  if (e.target.matches?.('textarea, input')) return;
-  if (buscador.abierto) return;
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-  if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); moverFoco(porFila()); return; }
-  if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); moverFoco(-porFila()); return; }
-  if (e.key === 'ArrowRight') { e.preventDefault(); moverFoco(1); return; }
-  if (e.key === 'ArrowLeft') { e.preventDefault(); moverFoco(-1); return; }
-
-  if (e.key === 'Escape' && state.sel.size > 0) {
-    e.preventDefault();
-    state.sel.clear();
-    pintarSeleccion();
-    return;
-  }
-
-  const card = tarjetaEnFoco();
-  if (!card) return;
-
-  if (e.key === ' ' || e.key === 'x' || e.key === 'X') {
-    e.preventDefault();
-    state.conTeclado = true;
-    elegir(card);
-    return;
-  }
-
-  if (e.key !== 'a' && e.key !== 'A' && e.key !== 'r' && e.key !== 'R') return;
-  if (state.filter !== 'pending') return;
-  e.preventDefault();
-  const status = (e.key === 'a' || e.key === 'A') ? 'approved' : 'rejected';
-  /*
-   * Con algo marcado, A y R resuelven LA SELECCION.
-   *
-   * Es lo que espera cualquiera que acaba de marcar ocho: si la A resolviera
-   * solo la tarjeta en foco, el trabajo de marcarlas no habria servido de
-   * nada y encima habria decidido una sin querer.
-   */
-  if (state.sel.size > 0) { decidirLote(status); return; }
-  decide(card, status);
-});
+// Los atajos de Revisar estan junto a la vista (Fase 3: tres zonas).
 
 // Tocar con el raton apaga el resaltado del teclado: tener dos cosas marcadas
 // a la vez -- una por el puntero y otra por las flechas -- no dice cual manda.
@@ -5223,7 +5321,8 @@ document.addEventListener('click', e => {
    */
   const marca = e.target.closest('[data-marcar]');
   if (marca) {
-    const video = card.querySelector('video');
+    // En Revisar el video esta en la zona central, fuera del detalle.
+    const video = card.querySelector('video') ?? document.getElementById('video-clip');
     if (!video) return;
     const base = Number(card.dataset.start);
     const t = Number((base + video.currentTime).toFixed(2));

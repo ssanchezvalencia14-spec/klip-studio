@@ -56,6 +56,8 @@ export const CSS = `  :root {
     --azul-texto: #8FA5FF;
     /* Texto encima del azul de relleno. */
     --sobre-acento: #FFFFFF;
+    /* Fondo de una tecla dibujada encima de un boton de color. */
+    --tecla-sobre-relleno: rgba(0, 0, 0, .25);
     --indigo: #8FA5FF;
     --indigo-texto: #B9C6FF;
     --azul-hueco: #1B2140;
@@ -2315,4 +2317,123 @@ export const CSS = `  :root {
 
   /* Repintar la misma pantalla no vuelve a animar la entrada. */
   main.quieto .cascada > *, main.quieto .paso-1, main.quieto .paso-2 { animation: none; }
+
+  /* =====================================================================
+   * Fase 3: Revisar en tres zonas.
+   * ===================================================================== */
+  .revisar {
+    display: grid; gap: var(--s4); align-items: start;
+    grid-template-columns: minmax(250px, 300px) auto minmax(300px, 1fr);
+    grid-template-areas: "cola video detalle";
+  }
+  .cola-revisar { grid-area: cola; position: sticky; top: 84px; display: flex; flex-direction: column; gap: var(--s2);
+    max-height: calc(100vh - 110px); }
+  .cola-revisar .lista-clips { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; }
+  .reproductor { grid-area: video; position: sticky; top: 84px; }
+  .detalle-clip { grid-area: detalle; }
+
+  /* La cola: cada clip en una fila. */
+  .item-clip { position: relative; display: flex; align-items: stretch; border-radius: var(--r-control); background: var(--panel); }
+  .item-clip.activo { background: var(--destacada); border-color: var(--destacada-borde); }
+  .item-clip.elegida { border-color: var(--azul-borde); }
+  .item-clip .elegir { position: static; display: flex; align-items: center; padding-left: 10px; background: none; }
+  .item-abrir {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 60px;
+    padding: 8px 10px; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; font: inherit;
+    border-radius: var(--r-control);
+  }
+  .item-mini {
+    flex: none; width: 30px; height: 52px; border-radius: 6px; background: var(--raised); border: 1px solid var(--line);
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; font-size: 9.5px; color: var(--faint);
+  }
+  .item-clip.activo .item-mini { border-color: var(--azul-borde); color: var(--azul-texto); }
+  .item-texto { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .item-titulo { font-size: var(--t-meta); font-weight: 600; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .item-meta { font-size: 11px; color: var(--faint); }
+  .puntaje {
+    flex: none; min-width: 34px; text-align: center; padding: 3px 6px; border-radius: var(--r-pildora);
+    font-size: 12px; font-weight: 600; background: var(--raised); color: var(--dim); border: 1px solid var(--line);
+  }
+  .puntaje.alto { background: var(--ok-fondo); color: var(--ok-texto); border-color: var(--ok-borde); }
+  .cola-revisar .lote { position: static; margin: 0; flex-wrap: wrap; }
+
+  /* El clip en vertical, 9:16. */
+  .marco-vertical {
+    position: relative; aspect-ratio: 9 / 16; height: min(calc(100vh - 140px), 720px); max-width: 100%;
+    border-radius: var(--r-panel); overflow: hidden; background: #000; border: 1px solid var(--line);
+  }
+  .marco-vertical video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .sin-video { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: var(--s3); padding: var(--s5); text-align: center; color: var(--dim); }
+  .sin-video .ico-svg { width: 32px; height: 32px; color: var(--faint); }
+
+  /* La insignia de la decision, con su golpe. */
+  .insignia {
+    position: absolute; top: 50%; left: 50%; translate: -50% -50%; z-index: 2;
+    display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: var(--r-pildora);
+    font-family: var(--fuente-titulo); font-weight: 650; font-size: 17px;
+    animation: pop var(--m-medio) var(--e-muelle) both;
+  }
+  .insignia.ok { background: var(--ok-fondo); color: var(--ok-texto); border: 1px solid var(--ok-borde); }
+  .insignia.no { background: var(--error-fondo); color: var(--error-texto); border: 1px solid var(--error-borde); }
+
+  /* El detalle. */
+  .detalle-titulo { font-size: 21px; font-weight: 650; line-height: 1.3; margin: 0 0 var(--s3); }
+  .rango { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); color: var(--dim); font-size: var(--t-meta); margin-bottom: var(--s4); }
+  .rango > span { display: inline-flex; align-items: center; gap: 6px; }
+  .rango .ico-svg { width: 15px; height: 15px; }
+  .puntaje-grande { margin-bottom: var(--s4); }
+  .puntaje-cab { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--t-meta); color: var(--dim); margin-bottom: 6px; }
+  .puntaje-cab b { font-size: 22px; color: var(--text); }
+  .puntaje-cab small { font-size: 12px; color: var(--faint); font-weight: 400; }
+  .puntaje-barra { display: block; height: 8px; border-radius: var(--r-pildora); background: var(--raised); overflow: hidden; }
+  .puntaje-barra i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--azul), var(--azul-texto)); }
+  .motivo { margin: 0 0 var(--s4); color: var(--dim); font-size: var(--t-meta); line-height: 1.55; }
+  .motivo b { color: var(--text); font-weight: 600; }
+  .linea-corte { position: relative; height: 6px; margin: var(--s3) 0; border-radius: var(--r-pildora); background: var(--raised); }
+  .linea-corte span { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: var(--azul); }
+  .decidir { display: grid; grid-template-columns: 1fr 1.4fr; gap: var(--s2); margin-top: var(--s4); }
+  .decidir .act { min-height: 52px; font-size: 15px; }
+  .decidir .act kbd { margin-left: 4px; background: var(--tecla-sobre-relleno); border-color: transparent; color: inherit; }
+  .act.approve { background: var(--azul); color: var(--sobre-acento); border: 0; }
+  .act.reject { background: var(--raised); color: var(--text); border: 1px solid var(--line); }
+  .atajos { margin: var(--s3) 0 0; font-size: 12px; color: var(--faint); text-align: center; }
+  .atajos kbd { margin: 0 2px; }
+
+  /* Aviso con "Deshacer". */
+  #aviso.con-accion { display: flex; align-items: center; gap: var(--s3); }
+  .aviso-boton {
+    min-height: 36px; padding: 0 12px; border-radius: var(--r-control); border: 1px solid var(--azul-borde);
+    background: var(--azul-hueco); color: var(--indigo-texto); font: inherit; font-weight: 600; cursor: pointer;
+  }
+
+  @media (max-width: 1199px) {
+    .revisar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "video detalle" "cola cola"; }
+    .cola-revisar { position: static; max-height: none; }
+    .marco-vertical { height: auto; width: 100%; }
+  }
+  /* Movil: el clip arriba, el detalle debajo y los botones fijos abajo. */
+  @media (max-width: 760px) {
+    .revisar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "video" "detalle" "cola"; }
+    .reproductor { position: static; }
+    .marco-vertical { width: min(100%, 360px); margin: 0 auto; }
+    .decidir {
+      position: fixed; left: 0; right: 0; z-index: 20; margin: 0;
+      bottom: calc(68px + env(safe-area-inset-bottom));
+      padding: var(--s2) var(--s4); background: var(--bg-velado); backdrop-filter: blur(10px);
+      border-top: 1px solid var(--line);
+    }
+    .decidir kbd, .atajos { display: none; }
+    .detalle-clip { margin-bottom: 72px; }
+  }
+
+  /* Aprobar arriba y a todo el ancho; descartar debajo. Nunca en dos lineas. */
+  .decidir { display: flex; flex-direction: column-reverse; }
+  .decidir .act { width: 100%; white-space: nowrap; }
+  @media (max-width: 760px) {
+    .decidir { flex-direction: row; }
+    .decidir .act.approve { flex: 1.4; }
+    .decidir .act.reject { flex: 1; }
+  }
 `

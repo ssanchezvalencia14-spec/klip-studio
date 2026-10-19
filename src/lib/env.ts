@@ -80,16 +80,25 @@ export function fromRoot(pathish: string): string {
   return isAbsolute(pathish) ? pathish : resolve(ROOT, pathish)
 }
 
-/** Rutas de binarios externos, fijadas por .env y nunca por el PATH. */
+/**
+ * Rutas de binarios externos, por configuracion.
+ *
+ * Lo recomendable en Windows es fijarlas en .env (hay dos ffmpeg en el PATH
+ * tras instalar yt-dlp por winget, y solo uno trae whisper y NVENC). Si no se
+ * fijan, se usa el del PATH: es lo normal en un VPS o en Docker, donde solo
+ * hay uno. `npm run doctor` dice cual se esta usando y si le falta algo.
+ *
+ * YT_DLP_PATH es el nombre del plan; YTDLP_PATH, el de siempre. Valen los dos.
+ */
 export const bin = {
   get ffmpeg(): string {
-    return requireEnv('FFMPEG_PATH')
+    return optionalEnv('FFMPEG_PATH') ?? 'ffmpeg'
   },
   get ffprobe(): string {
-    return requireEnv('FFPROBE_PATH')
+    return optionalEnv('FFPROBE_PATH') ?? 'ffprobe'
   },
   get ytdlp(): string {
-    return requireEnv('YTDLP_PATH')
+    return optionalEnv('YT_DLP_PATH') ?? optionalEnv('YTDLP_PATH') ?? 'yt-dlp'
   },
 }
 

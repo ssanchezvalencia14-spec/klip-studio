@@ -7,6 +7,7 @@
  * el PATH sin avisar.
  */
 import { existsSync, statSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 import { bin, loadEnv, optionalEnv, paths, ROOT } from '../src/lib/env.js'
 import { ffmpeg, ffprobe, run, ytdlp } from '../src/lib/proc.js'
 import { crearNube, CUBO } from '../src/store/nube.js'
@@ -49,8 +50,8 @@ async function main(): Promise<void> {
 
   record(
     'Archivo .env',
-    existsSync(`${ROOT}\\.env`),
-    existsSync(`${ROOT}\\.env`) ? 'presente' : 'ausente: copia .env.example a .env',
+    existsSync(join(ROOT, '.env')),
+    existsSync(join(ROOT, '.env')) ? 'presente' : 'ausente: copia .env.example a .env',
   )
 
   // --- Binarios --------------------------------------------------------------
@@ -66,10 +67,11 @@ async function main(): Promise<void> {
       record(`Ruta de ${label}`, false, error instanceof Error ? error.message : String(error))
       continue
     }
+    // Sin ruta fija se usa el del PATH: lo comprueba la version de mas abajo.
     record(
       `Ruta de ${label}`,
-      existsSync(resolved),
-      existsSync(resolved) ? resolved : `no existe: ${resolved}`,
+      !isAbsolute(resolved) || existsSync(resolved),
+      !isAbsolute(resolved) ? `del PATH (${resolved})` : existsSync(resolved) ? resolved : `no existe: ${resolved}`,
     )
   }
 

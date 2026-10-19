@@ -201,7 +201,11 @@ export interface FlowMath {
   windowHours: number
   /** Veces que un mismo clip puede usarse en un dia sin saltarse el enfriamiento. */
   maxUsesPerClip: number
-  /** Clips distintos necesarios al dia. */
+  /** Dias que una cuenta espera para repetir un clip. */
+  repeatDays: number
+  /** Clips distintos que hay que tener en reserva para cubrir esa espera. */
+  clipsEnRotacion: number
+  /** Clips distintos nuevos necesarios al dia (la reserva se renueva cada repeatDays). */
   clipsNeededPerDay: number
   /** Clips distintos necesarios al mes. */
   clipsNeededPerMonth: number
@@ -227,12 +231,34 @@ export function flowMath(s: FlowSettings): FlowMath {
       ? slotsPerDay
       : Math.floor((windowHours * 60) / s.clipCooldownMinutes) + 1
 
-  const clipsNeededPerDay = Math.max(1, Math.ceil(slotsPerDay / maxUsesPerClip))
+  /*
+   * FASE 5: la espera para repetir en la MISMA cuenta tambien cuenta.
+   *
+   * La formula vieja solo miraba la espera entre cuentas (hora y media), asi
+   * que con una cuenta y tres publicaciones al dia pedia 1 clip: el mismo
+   * video tres veces el mismo dia en la misma cuenta, que la propia regla de
+   * los 3 dias prohibe.
+   *
+   * En una ventana de R dias (la espera de la cuenta) hay A x P x R huecos. Un
+   * clip puede cubrir como mucho uno por cuenta en esa ventana (A), y ademas no
+   * mas de U al dia por la espera entre cuentas (U x R en la ventana). Asi que
+   * hace falta una reserva de ceil(A x P x R / min(A, U x R)) clips distintos,
+   * que se renueva cada R dias: ceil(reserva / R) nuevos al dia.
+   *
+   *   1 cuenta, 3 al dia, 3 dias de espera  ->  9 en reserva, 3 nuevos al dia.
+   */
+  const repeatDays = Math.max(1, s.accountRepeatHours / 24)
+  const accounts = Math.max(1, s.accounts)
+  const usosEnVentana = Math.max(1, Math.min(accounts, Math.floor(maxUsesPerClip * repeatDays)))
+  const clipsEnRotacion = Math.max(1, Math.ceil((accounts * s.postsPerDay * repeatDays) / usosEnVentana))
+  const clipsNeededPerDay = Math.max(1, Math.ceil(clipsEnRotacion / repeatDays))
 
   return {
     slotsPerDay,
     windowHours,
     maxUsesPerClip,
+    repeatDays,
+    clipsEnRotacion,
     clipsNeededPerDay,
     clipsNeededPerMonth: clipsNeededPerDay * 30,
   }

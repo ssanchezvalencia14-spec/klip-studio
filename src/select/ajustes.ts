@@ -1,5 +1,16 @@
 import type { Db as DbLike } from '../store/db.js'
 
+/*
+ * La zona segura de TikTok (Fase 5).
+ *
+ * La interfaz de TikTok (descripcion, nombre, botones) tapa el 20 % de abajo
+ * del video: 384 px de 1920. Un subtitulo a 380 px del borde, que era el
+ * valor por defecto, quedaba justo dentro. El minimo pasa a 400 px y el valor
+ * por defecto a 480 (un 25 %), con margen para dos lineas.
+ */
+export const ZONA_SEGURA_PX = 400
+export const SUB_MARGEN_DEFECTO = 480
+
 /**
  * Como se cortan los videos.
  *
@@ -115,7 +126,7 @@ export const CLIP_DEFAULTS: ClipSettings = {
   subtitles: true,
   subFont: 'Impact',
   subSize: 72,
-  subMargin: 380,
+  subMargin: SUB_MARGEN_DEFECTO,
   subColor: '#FFFFFF',
   subColorBorde: '#000000',
   subBorde: 7,
@@ -191,7 +202,7 @@ const LIMITS: Record<Numericos, [number, number]> = {
   subSize: [40, 120],
   // 0 lo pega al borde, donde la interfaz de TikTok lo tapa. 900 lo sube por
   // encima del centro del encuadre, que es donde esta la cara.
-  subMargin: [120, 900],
+  subMargin: [ZONA_SEGURA_PX, 900],
   // Sin borde el texto blanco desaparece sobre fondo claro; pasado de 20 las
   // letras se empastan entre si y no se lee nada.
   subBorde: [0, 20],
@@ -389,6 +400,13 @@ export function ajustesDeFila(fila: Record<string, unknown>): ClipSettings {
     const valor = Number(fila[COLUMNAS[key]])
     if (Number.isFinite(valor)) out[key] = valor
   }
+  /*
+   * Una altura guardada antes de la Fase 5 puede estar dentro de la zona que
+   * tapa TikTok (el minimo era 120). Al leerla se sube al minimo: si no, el
+   * siguiente guardado de CUALQUIER ajuste fallaria por un valor que nadie
+   * toco.
+   */
+  if (out.subMargin < ZONA_SEGURA_PX) out.subMargin = ZONA_SEGURA_PX
   /*
    * Los dos campos que no son numeros, cada uno con su trampa.
    *

@@ -3,6 +3,7 @@ import { optionalEnv } from '../lib/env.js'
 import { ensureDir } from '../lib/fsx.js'
 import { dirname } from 'node:path'
 import type { TranscriptSegment } from '../types.js'
+import { SUB_MARGEN_DEFECTO, ZONA_SEGURA_PX } from '../select/ajustes.js'
 
 /** Lienzo de referencia. Debe coincidir con la resolucion de salida. */
 export const PLAY_RES_X = 1080
@@ -15,7 +16,7 @@ export const PLAY_RES_Y = 1920
  * usuario y el audio. Un subtitulo pegado al borde queda tapado. 380 lo levanta
  * por encima de esa zona sin llevarlo al centro.
  */
-const MARGIN_V = 380
+const MARGIN_V = SUB_MARGEN_DEFECTO
 
 /**
  * Tipografias admitidas, repetidas aqui a proposito.
@@ -245,7 +246,8 @@ export function buildAss(
   // cuatro, que tapan al hablante. A 72 px la mediana cabe en una y el p90 en
   // dos, que es lo que deja los subtitulos dentro de la banda desenfocada.
   const fontSize = options.fontSize ?? Number(optionalEnv('SUBTITLE_SIZE') ?? '72')
-  const marginV = options.marginV ?? MARGIN_V
+  // Nunca dentro de la zona que tapa TikTok, venga de donde venga el valor.
+  const marginV = Math.max(ZONA_SEGURA_PX, options.marginV ?? MARGIN_V)
 
   const porRotulo = options.wordsPerCue ?? 0
   const animar = options.animate === true && porRotulo > 0

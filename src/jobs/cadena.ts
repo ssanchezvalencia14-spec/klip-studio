@@ -59,7 +59,7 @@ function leerDelResumen(job: Job, campo: string): string | undefined {
   return patron.exec(job.log)?.[1]
 }
 
-type PasoEncadenable = 'select' | 'momentos' | 'render' | 'subir' | 'schedule'
+export type PasoEncadenable = 'select' | 'momentos' | 'render' | 'subir' | 'schedule'
 
 /** Decide que toca despues, o nada si la cadena termina aqui. */
 function siguientePaso(job: Job): { kind: PasoEncadenable; sourceId: string } | null {
@@ -138,7 +138,17 @@ const ETIQUETAS = {
  * antes de arrancar. Sin eso, reiniciar el panel relanzaria el select de cada
  * ingest del historial, que son horas de GPU por un reinicio.
  */
-export function arrancarCadena(cola: Cola, alEncolar?: () => void): () => void {
+/**
+ * Los argumentos de un paso, con los ajustes guardados.
+ *
+ * FASE 5: el encadenado encolaba el render con el sourceId y nada mas, asi que
+ * los clips que se armaban solos ignoraban Ajustes (palabras por subtitulo,
+ * altura, color...): de ahi los subtitulos de seis a ocho palabras con el
+ * ajuste en tres. Quien sabe leer los ajustes es el servidor; aqui se le pide.
+ */
+export type ArgsDePaso = (kind: PasoEncadenable, sourceId: string) => Promise<string[] | null>
+
+export function arrancarCadena(cola: Cola, alEncolar?: () => void, argsDe?: ArgsDePaso): () => void {
   if (process.env.AUTO_CHAIN === '0') {
     log.info('Encadenado desactivado por AUTO_CHAIN=0. Cada paso habra que lanzarlo a mano.')
     return () => {}
@@ -172,10 +182,12 @@ export function arrancarCadena(cola: Cola, alEncolar?: () => void): () => void {
       }
 
       log.info(`${job.kind} termino, sigue ${siguiente.kind} de ${siguiente.sourceId}`)
+      const conAjustes = await argsDe?.(siguiente.kind, siguiente.sourceId).catch(() => null)
       await cola.encolar(
         siguiente.kind,
-        // Sin --aplicar, momentos solo enseña la propuesta y no escribe clips.json.
-        siguiente.kind === 'momentos' ? [siguiente.sourceId, '--aplicar'] : [siguiente.sourceId],
+        conAjustes ??
+          // Sin --aplicar, momentos solo enseña la propuesta y no escribe clips.json.
+          (siguiente.kind === 'momentos' ? [siguiente.sourceId, '--aplicar'] : [siguiente.sourceId]),
         ETIQUETAS[siguiente.kind](siguiente.sourceId),
       )
       alEncolar?.()

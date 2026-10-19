@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { arrancarCadena } from '../jobs/cadena.js'
@@ -48,6 +48,7 @@ import { storeUpload, UploadError } from './upload.js'
 import { createEstadoIA, iaPausada, textoEstadoIA } from '../llm/estado.js'
 import { createAuth, ErrorUsuarios, permitido, type Auth } from '../auth/auth.js'
 import { createSistema, NAVEGADORES_COOKIES } from '../jobs/sistema.js'
+import { rutaFotograma } from '../render/render.js'
 import {
   atenderAcceso,
   esCifrada,
@@ -758,12 +759,22 @@ async function contarCuentasReales(
   db: Db,
   ownerId: string,
 ): Promise<{ creadas: number; enlazadas: number; publicables: number }> {
+  /*
+   * "Enlazada" depende de por donde se publique (Fase 5). Con upload-post el
+   * permiso lo tiene su perfil y basta con que la cuenta este activa; con la
+   * API directa hace falta el permiso de TikTok. Es la misma regla que
+   * store.accounts.publicables, la que usa Inicio: los dos numeros coinciden.
+   */
+  const porUploadPost = proveedorActivo() === 'upload-post'
   const filas = await db.query<{ creadas: string; enlazadas: string }>(
-    `select (select count(*) from accounts where owner_id = $1) as creadas,
-            (select count(*) from accounts a
-               join tiktok_tokens t
-                 on t.owner_id = a.owner_id and t.account_id = a.id
-              where a.owner_id = $1 and a.status = 'active') as enlazadas`,
+    porUploadPost
+      ? `select (select count(*) from accounts where owner_id = $1) as creadas,
+                (select count(*) from accounts where owner_id = $1 and status = 'active') as enlazadas`
+      : `select (select count(*) from accounts where owner_id = $1) as creadas,
+                (select count(*) from accounts a
+                   join tiktok_tokens t
+                     on t.owner_id = a.owner_id and t.account_id = a.id
+                  where a.owner_id = $1 and a.status = 'active') as enlazadas`,
     [ownerId],
   )
   const creadas = Number(filas[0]?.creadas ?? 0)
@@ -822,10 +833,10 @@ function resumirPlataformas(
        */
       nota:
         enlazadas === 0
-          ? 'Enlaza una cuenta mas abajo para empezar. La autorizacion se hace en ' +
+          ? 'Enlaza una cuenta más abajo para empezar. La autorización se hace en ' +
             'tiktok.com: el programa nunca ve tu contraseña.'
           : deTikTok.length === 0
-            ? 'Conectado y sin publicar nada todavia. En cuanto apruebes videos ' +
+            ? 'Conectado y sin publicar nada todavía. En cuanto apruebes videos ' +
               'empezaran a salir solos.'
             : null,
     },
@@ -837,7 +848,7 @@ function resumirPlataformas(
       publicaciones: 0,
       ultima: null,
       via: null,
-      nota: 'Todavia no esta hecho. El reparto y el render ya valen tal cual; falta quien lo suba.',
+      nota: 'Todavía no está hecho. El reparto y el render ya valen tal cual; falta quien lo suba.',
     },
     {
       id: 'instagram',
@@ -847,7 +858,7 @@ function resumirPlataformas(
       publicaciones: 0,
       ultima: null,
       via: null,
-      nota: 'Todavia no esta hecho. El reparto y el render ya valen tal cual; falta quien lo suba.',
+      nota: 'Todavía no está hecho. El reparto y el render ya valen tal cual; falta quien lo suba.',
     },
   ]
 }
@@ -1230,7 +1241,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     }
     const items = Array.isArray(body.items) ? body.items : []
     if (items.length === 0) {
-      sendJson(res, 400, { error: 'No se mando ningun clip.' })
+      sendJson(res, 400, { error: 'No se mandó ningún clip.' })
       return
     }
     if (items.length > 100) {
@@ -1643,6 +1654,44 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     return
   }
 
+  /*
+   * "Volver a armar" los clips pendientes con el estilo actual (Fase 5).
+   *
+   * Cambiar el estilo solo afecta a lo que se arma DESPUES. Esto rehace lo que
+   * aun espera revision: lo aprobado y lo descartado no se toca, porque ya se
+   * decidio sobre el video tal como estaba. Un video con todos sus clips
+   * pendientes se rehace de una vez; si no, clip a clip.
+   */
+  if (path === '/api/ajustes/rearmar' && req.method === 'POST') {
+    const ajustes = await loadClipSettings(db, ownerId)
+    const todos = await store.clips.all()
+    const porVideo = new Map<string, { pendientes: string[]; total: number }>()
+    for (const c of todos) {
+      if (c.masterPath === '' && c.status !== 'pending') continue
+      const v = porVideo.get(c.sourceId) ?? { pendientes: [], total: 0 }
+      v.total += 1
+      if (c.status === 'pending') v.pendientes.push(c.clipId)
+      porVideo.set(c.sourceId, v)
+    }
+    let tareas = 0
+    let clips = 0
+    for (const [sourceId, v] of porVideo) {
+      if (v.pendientes.length === 0) continue
+      if (await cola.hayActiva(['render'], sourceId)) continue
+      const conocidos = new Set([sourceId])
+      const lotes = v.pendientes.length === v.total ? [undefined] : v.pendientes
+      for (const clipId of lotes) {
+        const built = buildJob('render', { sourceId, ...(clipId ? { clipId } : {}) }, conocidos, ajustes)
+        await cola.encolar(built.kind, built.args, built.label)
+        tareas += 1
+      }
+      clips += v.pendientes.length
+    }
+    avisarCambio('trabajos')
+    sendJson(res, 200, { tareas, clips })
+    return
+  }
+
   if (path === '/api/ajustes' && req.method === 'PUT') {
     const body = (await readBody(req)) as Record<string, unknown>
     try {
@@ -1796,7 +1845,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     const code = url.searchParams.get('code')
     const state = url.searchParams.get('state')
     if (code === null || state === null) {
-      pagina('Falta informacion', 'La direccion no trae el codigo o el state.', false)
+      pagina('Falta información', 'La dirección no trae el código o el state.', false)
       return
     }
 
@@ -1867,7 +1916,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
           'Esa cuenta ya estaba enlazada',
           `Esta cuenta de TikTok${yaEn} ya pertenece a otra cuenta del sistema, asi que no se ` +
             `puede asignar tambien a ${accountId}. Suele pasar cuando el navegador reutiliza una ` +
-            'sesion abierta: abre una ventana de incognito nueva e inicia sesion con la cuenta ' +
+            'sesión abierta: abre una ventana de incognito nueva e inicia sesión con la cuenta ' +
             'que querias enlazar. Pide otro enlace, porque este ya se ha gastado.',
           false,
         )
@@ -2080,7 +2129,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
             `${describirTope(ajustes.maxCuentas)}. ` +
             (plan === undefined
               ? 'Cambialo en Ajustes, Horarios.'
-              : 'Para tener mas, contrata un plan mayor en upload-post y elige ese ' +
+              : 'Para tener más, contrata un plan mayor en upload-post y elige ese ' +
                 'plan en Ajustes, Horarios.'),
         })
         return
@@ -2365,6 +2414,39 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     return
   }
 
+  /*
+   * El fotograma limpio de un clip, para la vista previa de Estilo (Fase 5).
+   * Mismo camino que el video: el archivo en este ordenador, o una URL firmada
+   * de un minuto de la copia en la nube.
+   */
+  const foto = /^\/fotograma\/([^/]+)\/([^/]+)$/.exec(path)
+  if (foto !== null && req.method === 'GET') {
+    const clip = await store.clips.find(decodeURIComponent(foto[1] ?? ''), decodeURIComponent(foto[2] ?? ''))
+    if (clip === undefined) {
+      sendJson(res, 404, { error: 'Clip no encontrado' })
+      return
+    }
+    const local = clip.masterPath === '' ? '' : rutaFotograma(clip.masterPath)
+    if (!esRemoto() && local !== '' && existsSync(local)) {
+      const datos = readFileSync(local)
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': datos.length, 'cache-control': 'no-store' })
+      res.end(datos)
+      return
+    }
+    if (clip.proxyPath === '' || nube === null) {
+      sendJson(res, 404, { error: 'Este clip no tiene fotograma.' })
+      return
+    }
+    try {
+      const firmada = await nube.firmar(clip.proxyPath.replace(/\.mp4$/i, '.jpg'), 60)
+      res.writeHead(302, { location: firmada, 'cache-control': 'no-store' })
+      res.end()
+    } catch {
+      sendJson(res, 404, { error: 'Este clip no tiene fotograma.' })
+    }
+    return
+  }
+
   const video = /^\/video\/([^/]+)\/([^/]+)$/.exec(path)
   if (video !== null && req.method === 'GET') {
     const clip = await store.clips.find(
@@ -2391,7 +2473,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     if (clip.proxyPath === '') {
       sendJson(res, 501, {
         error:
-          'Este video todavia no esta subido. En el ordenador que los crea, ' +
+          'Este video todavía no esta subido. En el ordenador que los crea, ' +
           'entra en Inicio y pulsa "Subir para revisar".',
       })
       return
@@ -2401,7 +2483,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       sendJson(res, 501, {
         error:
           'Falta la clave de Supabase en este servidor (SUPABASE_SERVICE_ROLE_KEY), ' +
-          'asi que el panel no puede pedir los videos subidos.',
+          'así que el panel no puede pedir los videos subidos.',
       })
       return
     }
@@ -2480,7 +2562,11 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
   }
 
   // Subir un video dispara por si solo la busqueda de momentos y el render.
-  arrancarCadena(ctx.cola, () => avisarCambio('trabajos'))
+  // Cada paso encadenado lleva los ajustes guardados, igual que si se pulsara
+  // el boton en el panel (Fase 5: antes iban sin ellos).
+  arrancarCadena(ctx.cola, () => avisarCambio('trabajos'), async (kind, sourceId) =>
+    buildJob(kind, { sourceId }, new Set([sourceId]), await loadClipSettings(db, ownerId)).args,
+  )
   vigilarTareas(ctx.cola)
 
   const server = createServer((req, res) => {
@@ -2513,13 +2599,13 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
 
   void ctx.auth.contar().then((n) => {
     if (n === 0 && !sinLogin) {
-      console.log('  AVISO  : no hay ningun usuario. Crea el primero con: npm run crear-admin')
+      console.log('  AVISO  : no hay ningún usuario. Crea el primero con: npm run crear-admin')
     }
   }).catch(() => {})
 
   server.listen(port, host, () => {
     console.log('')
-    console.log('Panel de revision en marcha:')
+    console.log('Panel de revisión en marcha:')
     console.log(`  local  : http://localhost:${port}`)
     if (host === '0.0.0.0') {
       for (const address of localAddresses()) {
@@ -2532,7 +2618,7 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
     } else {
       console.log('  acceso : correo y contraseña (/login).')
       if (legadoActivo()) {
-        console.log('           Tambien la llave antigua (LEGACY_KEY_ENABLED=true). Quitala al confirmar el login.')
+        console.log('           También la llave antigua (LEGACY_KEY_ENABLED=true). Quitala al confirmar el login.')
       }
     }
     if (esRemoto()) {

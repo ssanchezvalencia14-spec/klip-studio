@@ -1,5 +1,5 @@
 import { JOB_KINDS, type JobKind } from '../jobs/cola.js'
-import { CLIP_DEFAULTS, FUENTES, type ClipSettings } from '../select/ajustes.js'
+import { CLIP_DEFAULTS, FUENTES, ZONA_SEGURA_PX, type ClipSettings } from '../select/ajustes.js'
 
 /**
  * Traduccion de lo que pide el panel a un comando concreto.
@@ -155,8 +155,8 @@ export function buildJob(
 
       args.push('--max-per-window', String(requireNumber(maxPerWindow, 'Clips por ventana', 1, 6)))
       args.push('--window', String(requireNumber(windowSec, 'Tamaño de ventana', 300, 1800)))
-      args.push('--min', String(requireNumber(minSec, 'Duracion minima', 10, 60)))
-      args.push('--max', String(requireNumber(maxSec, 'Duracion maxima', 30, 180)))
+      args.push('--min', String(requireNumber(minSec, 'Duración mínima', 10, 60)))
+      args.push('--max', String(requireNumber(maxSec, 'Duración máxima', 30, 180)))
 
       return { kind: 'select', args, label: `Buscar momentos de ${sourceId}` }
     }
@@ -224,7 +224,7 @@ export function buildJob(
           const ini = requireNumber(params.start, 'Inicio del corte', 0, 21600)
           const fin = requireNumber(params.end, 'Fin del corte', 0, 21600)
           if (fin <= ini) {
-            throw new BadRequest('El final del corte tiene que ir despues del principio.')
+            throw new BadRequest('El final del corte tiene que ir después del principio.')
           }
           // Los mismos limites de duracion que valida Ajustes, para que un
           // recorte a mano no produzca un clip que TikTok rechaza por corto.
@@ -259,8 +259,8 @@ export function buildJob(
           throw new BadRequest(`La tipografia ${ajustes.subFont} no esta en la lista.`)
         }
         args.push('--sub-font', ajustes.subFont)
-        args.push('--sub-size', String(requireNumber(ajustes.subSize, 'Cuerpo del subtitulo', 40, 120)))
-        args.push('--sub-margin', String(requireNumber(ajustes.subMargin, 'Altura del subtitulo', 120, 900)))
+        args.push('--sub-size', String(requireNumber(ajustes.subSize, 'Cuerpo del subtítulo', 40, 120)))
+        args.push('--sub-margin', String(requireNumber(ajustes.subMargin, 'Altura del subtítulo', ZONA_SEGURA_PX, 900)))
 
         /*
          * Color y borde se comprueban aqui tambien, como la fuente.
@@ -280,7 +280,7 @@ export function buildJob(
           args.push(bandera, valor)
         }
         args.push('--sub-borde', String(requireNumber(ajustes.subBorde, 'Grosor del borde', 0, 20)))
-        args.push('--sub-words', String(requireNumber(ajustes.subPalabras, 'Palabras por rotulo', 1, 7)))
+        args.push('--sub-words', String(requireNumber(ajustes.subPalabras, 'Palabras por rótulo', 1, 7)))
         if (ajustes.subAnimacion) args.push('--sub-animate')
       }
 
@@ -302,14 +302,14 @@ export function buildJob(
          * fijo quemaria la misma frase en los cien clips del VOD.
          */
         if (!ajustes.tituloTexto.includes('{titulo}')) {
-          throw new BadRequest('El rotulo del video debe incluir {titulo}.')
+          throw new BadRequest('El rótulo del video debe incluir {titulo}.')
         }
         args.push('--titulo-texto', ajustes.tituloTexto)
         args.push(
           '--titulo-arriba',
-          String(requireNumber(ajustes.tituloArriba, 'Altura del rotulo', 80, 700)),
+          String(requireNumber(ajustes.tituloArriba, 'Altura del rótulo', 80, 700)),
         )
-        args.push('--titulo-tam', String(requireNumber(ajustes.tituloTam, 'Cuerpo del rotulo', 36, 110)))
+        args.push('--titulo-tam', String(requireNumber(ajustes.tituloTam, 'Cuerpo del rótulo', 36, 110)))
         // Los colores, por la misma puerta que los del subtitulo y por el
         // mismo motivo: acaban en una linea separada por comas de un .ass.
         for (const [bandera, valor] of [
@@ -323,7 +323,7 @@ export function buildJob(
         }
         args.push(
           '--titulo-borde',
-          String(requireNumber(ajustes.tituloBorde, 'Borde del rotulo', 0, 20)),
+          String(requireNumber(ajustes.tituloBorde, 'Borde del rótulo', 0, 20)),
         )
       }
 

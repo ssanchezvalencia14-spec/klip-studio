@@ -98,9 +98,9 @@ export function clasificarFallo(error: unknown): FalloSelect {
       clase: 'saldo',
       definitivo: true,
       mensaje:
-        'La cuenta de Anthropic no tiene saldo. El credito de la API es una bolsa aparte de ' +
+        'La cuenta de Anthropic no tiene saldo. El crédito de la API es una bolsa aparte de ' +
         'cualquier suscripcion de Claude: se recarga en platform.claude.com, en Billing. ' +
-        'Si el video es musica, el boton "Es musica: buscar estribillos" no usa la API.',
+        'Si el video es música, el boton "Es música: buscar estribillos" no usa la API.',
     }
   }
 

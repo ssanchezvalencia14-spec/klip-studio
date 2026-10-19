@@ -66,15 +66,15 @@ const SOLO_ADMIN = ['proyectos', 'plataformas', 'flujo', 'ajustes', 'ia', 'usuar
  * se dice que vera y que puede hacer alli.
  */
 const INTROS = {
-  proceso: 'Desde aqui se añaden videos y se ve en que punto va cada uno. Lo demas lo hace el programa solo.',
-  clips: 'Los momentos que el programa ha encontrado. Aprueba los que valgan y descarta el resto: es la unica decision que no toma el programa.',
-  cola: 'Lo que va a salir, con su dia y su hora. No hay que lanzarlo: se publica solo.',
-  metricas: 'Como le va a lo ya publicado.',
-  proyectos: 'Cada cliente con sus cuentas, sus campañas y su ritmo de publicacion.',
-  plataformas: 'Las cuentas donde se publica y en que estado esta cada una.',
-  flujo: 'A que hora y con que frecuencia sale cada video.',
-  ajustes: 'Como se cortan los videos, como se ven los subtitulos y que texto los acompaña.',
-  registro: 'Todo lo que ha hecho el programa, lo que tardo y lo que costo.',
+  proceso: 'Desde aquí se añaden videos y se ve en qué punto va cada uno. Lo demás lo hace el programa solo.',
+  clips: 'Los momentos que el programa ha encontrado. Aprueba los que valgan y descarta el resto: es la única decisión que no toma el programa.',
+  cola: 'Lo que va a salir, con su día y su hora. No hay que lanzarlo: se publica solo.',
+  metricas: 'Cómo le va a lo ya publicado.',
+  proyectos: 'Cada cliente con sus cuentas, sus campañas y su ritmo de publicación.',
+  plataformas: 'Las cuentas donde se publica y en qué estado está cada una.',
+  flujo: 'A qué hora y con qué frecuencia sale cada video.',
+  ajustes: 'Cómo se cortan los videos, cómo se ven los subtítulos y qué texto los acompaña.',
+  registro: 'Todo lo que ha hecho el programa, lo que tardó y lo que costó.',
   ia: 'La IA que elige los mejores momentos: si está lista y cómo probarla.',
   usuarios: 'Quién puede entrar al panel y qué puede hacer cada uno.',
 };
@@ -245,10 +245,10 @@ const PASO = {
   render: 'Videos creados',
   variants: 'Copias por cuenta hechas',
   schedule: 'Reparto rehecho',
-  publish: 'Envio terminado',
-  metrics: 'Numeros actualizados',
+  publish: 'Envío terminado',
+  metrics: 'Números actualizados',
   accounts: 'Cuentas revisadas',
-  doctor: 'Revision terminada',
+  doctor: 'Revisión terminada',
 };
 
 /**
@@ -280,7 +280,7 @@ function pintarAvisos() {
     el.setAttribute('role', 'region');
     el.setAttribute('aria-label', 'Avisos');
     el.innerHTML = lista.length === 0
-      ? '<p class="vacio">Nada todavia. Aqui te aviso cuando termine un trabajo.</p>'
+      ? '<p class="vacio">Nada todavía. Aquí te aviso cuando termine un trabajo.</p>'
       : lista.map(j =>
           // Un fallo lleva SIEMPRE al Historial, sea del paso que sea: lo que
           // quiere quien lo pulsa es saber por que fallo, y eso esta en el
@@ -604,7 +604,7 @@ function pintarJob(job, destacado) {
       (job.status === 'queued' && !job.claimedBy && minutosDesde(job.createdAt) >= 1
         ? '<div class="warn" style="margin:10px 0 0">' +
             '<b>Nadie la ha recogido.</b> Esta tarea la ejecuta el ordenador que tiene los ' +
-            'videos, y ahi no hay ningun trabajador escuchando. Arrancalo con ' +
+            'videos, y ahí no hay ningún trabajador escuchando. Arráncalo con ' +
             '<i>npm run worker</i> y la cogera en unos segundos.' +
           '</div>'
         : '') +
@@ -635,7 +635,7 @@ function pintarJob(job, destacado) {
  */
 function siguientePaso(o) {
   if (o.sources.length === 0) {
-    return { texto: 'Empieza con un video', sub: 'Pega un enlace de YouTube o sube uno de tu movil.', accion: null };
+    return { texto: 'Empieza con un video', sub: 'Pega un enlace de YouTube o sube uno de tu móvil.', accion: null };
   }
 
   for (const s of o.sources) {
@@ -695,7 +695,7 @@ function siguientePaso(o) {
     if (revisables > 0 && (o.subidos?.[s.sourceId] ?? 0) === 0) {
       return {
         texto: 'Subir ' + plural(revisables, 'video') + ' para poder revisarlos',
-        sub: s.title + '. Sin esto no se ven desde el movil.',
+        sub: s.title + '. Sin esto no se ven desde el móvil.',
         accion: { kind: 'subir', source: s.sourceId, label: 'Subir para revisar' },
       };
     }
@@ -704,13 +704,13 @@ function siguientePaso(o) {
   if (o.clips.pending > 0) {
     return {
       texto: plural(o.clips.pending, 'video espera', 'videos esperan') + ' que lo veas',
-      sub: 'Es lo unico que no puede hacer el programa solo.',
+      sub: 'Es lo único que no puede hacer el programa solo.',
       accion: { vista: 'clips', label: 'Revisar ahora' },
     };
   }
 
   if (o.clips.approved === 0) {
-    return { texto: 'No has aprobado ningun video', sub: 'Hasta que apruebes alguno no hay nada que subir.', accion: null };
+    return { texto: 'No has aprobado ningún video', sub: 'Hasta que apruebes alguno no hay nada que subir.', accion: null };
   }
 
   /*
@@ -740,12 +740,12 @@ function siguientePaso(o) {
   if (o.clips.approved < o.target) {
     return {
       texto: 'Te faltan videos aprobados',
-      sub: 'Tienes ' + o.clips.approved + ' y hacen falta ' + o.target + ' al dia. Se repetiran de mas.',
+      sub: 'Tienes ' + o.clips.approved + ' y hacen falta ' + o.target + ' al día. Se repetiran de más.',
       accion: { vista: 'clips', label: 'Seguir revisando' },
     };
   }
 
-  return { texto: 'Todo listo', sub: o.queue.total + ' subidas programadas y videos de sobra.', accion: null, ok: true };
+  return { texto: 'Todo listo', sub: plural(o.queue.total, 'subida programada', 'subidas programadas') + ' y videos de sobra.', accion: null, ok: true };
 }
 
 function pintarSiguiente(o, ocupado) {
@@ -858,7 +858,7 @@ function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
       '<button class="srctitle" data-vod="' + esc(s.sourceId) + '">' + esc(s.title) + '</button>' +
       (enCurso ? '<span class="girando" role="img" aria-label="Procesando">${espiral(15)}</span>' : '') +
     '</div>' +
-    '<div class="srcmeta">' + (s.durationMin !== null ? s.durationMin + ' min' : 'duracion desconocida') + '</div>' +
+    '<div class="srcmeta">' + (s.durationMin !== null ? s.durationMin + ' min' : 'duración desconocida') + '</div>' +
     /*
      * La linea de tiempo, solo si sabemos cuanto dura el VOD y ya hay
      * momentos. Sin duracion no hay escala, y una barra vacia no dice nada
@@ -889,8 +889,8 @@ function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
            */
           (siguiente[0] === 'select'
             ? '<button class="chip" data-run="momentos" data-source="' + esc(s.sourceId) + '"' +
-              (ocupado ? ' disabled' : '') + ' title="Para musica. Busca los estribillos midiendo el audio, sin gastar saldo.">' +
-              'Es musica: buscar estribillos</button>'
+              (ocupado ? ' disabled' : '') + ' title="Para música. Busca los estribillos midiendo el audio, sin gastar saldo.">' +
+              'Es música: buscar estribillos</button>'
             : '') +
           // Rehacer un paso ya dado es legitimo (cambiaste los ajustes), pero
           // no es lo normal, asi que va detras y sin destacar.
@@ -907,7 +907,7 @@ function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
         // que son situaciones muy distintas.
         ? '<p class="reason" style="margin:0">' +
             (todoDescartado
-              ? 'Se descartaron sus ' + s.clips + ' momentos, asi que no queda nada que publicar.'
+              ? (s.clips === 1 ? 'Se descartó su único momento' : 'Se descartaron sus ' + s.clips + ' momentos') + ', así que no queda nada que publicar.'
               : 'Falta aprobar alguno en Revisar para poder copiarlo a las cuentas.') +
           '</p>'
       : sinEmpezar
@@ -915,7 +915,7 @@ function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
         // fallo. Ofrecer un boton aqui solo lleva a un error incomprensible.
         ? (ocupado
             ? '<p class="reason" style="margin:0">Trabajando en el. ' +
-              'Cuando acabe te esperara en Revisar.</p>'
+              'Cuando acabe te esperará en Revisar.</p>'
             /*
              * Una descarga fallida dejaba una ficha muerta y sin salida.
              *
@@ -926,8 +926,8 @@ function pintarFuente(s, ocupado, variantes, enCurso, subidos) {
              * leia al abrir el panel.
              */
             : '<p class="reason" style="margin:0 0 var(--s3)">' +
-              'La descarga no llego a terminar, asi que no hay nada que cortar. ' +
-              'Vuelve a añadirlo desde arriba, o quitalo de la lista.</p>' +
+              'La descarga no llego a terminar, así que no hay nada que cortar. ' +
+              'Vuelve a añadirlo desde arriba, o quítalo de la lista.</p>' +
               '<div class="chips">' +
                 '<button class="chip" data-quitar-vod="' + esc(s.sourceId) + '">' +
                 'Quitar de la lista</button>' +
@@ -959,12 +959,12 @@ function pintarRitmo(o) {
     ? ''
     : conectadas.length > 0
       ? conectadas.map(p => esc(p.nombre)).join(' y ') + ' conectado' + (conectadas.length === 1 ? '' : 's')
-      : 'Sin ninguna plataforma conectada todavia';
+      : 'Sin ninguna plataforma conectada todavía';
 
   return '<article class="card flat paso-2"><div class="body">' +
     '<p class="reason" style="margin:0">' +
       (r.total === 0
-        ? 'Todavia no has sacado ningun momento.'
+        ? 'Todavía no has sacado ningún momento.'
         : plural(r.semana, 'momento') + ' esta semana, ' + r.total + ' en total.') +
     '</p>' +
     (salida
@@ -1001,7 +1001,7 @@ function pintarNube(o) {
 
   return '<article class="card"><div class="body"><div class="warn" style="margin:0">' +
     '<b>Las copias ocupan ' + mb.toFixed(0) + ' MB de ' + LIMITE + '.</b> ' +
-    'Cuando se llene no se podran subir videos nuevos. Las de los VOD que ya no revises ' +
+    'Cuando se llene no se podrán subir videos nuevos. Las de los videos que ya no revises ' +
     'se pueden borrar sin perder nada: los originales siguen en tu ordenador.' +
   '</div></div></article>';
 }
@@ -2051,7 +2051,7 @@ function vistaCola() {
   if (proximas.length === 0) {
     html += '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
       '<b>No queda nada por publicar.</b> Las ' + q.total + ' entradas de la cola ya salieron ' +
-      'o fallaron. Aprueba mas videos y vuelve a repartir desde Inicio.' +
+      'o fallaron. Aprueba más videos y vuelve a repartir desde Inicio.' +
     '</div></div></div>';
   } else {
     /*
@@ -2070,8 +2070,8 @@ function vistaCola() {
     if (q.vencidas > 0) {
       html += '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
         '<b>' + q.vencidas + ' esperando turno.</b> Tenian hora asignada y ya paso. ' +
-        'Lo normal es que sea el ritmo: cada cuenta admite 13 entregas al dia, y van ' +
-        'saliendo en orden. Si no bajan en todo un dia, mira que el ordenador de casa ' +
+        'Lo normal es que sea el ritmo: cada cuenta admite 13 entregas al día, y van ' +
+        'saliendo en orden. Si no bajan en todo un día, mira que el ordenador de casa ' +
         'este encendido y que las cuentas sigan enlazadas.' +
       '</div></div></div>';
     }
@@ -2083,10 +2083,10 @@ function vistaCola() {
 
   html += seccion('&#9679;', 'Salud de la cola', 'Si lo programado está saliendo al ritmo previsto.') +
     '<article class="card flat"><div class="body">' +
-      '<details class="nota"><summary>Que mide esto</summary>' +
-        '<p>Cuantas veces se repite cada video entre las cuentas. Repetir mucho cansa ' +
+      '<details class="nota"><summary>Qué mide esto</summary>' +
+        '<p>Cuántas veces se repite cada video entre las cuentas. Repetir mucho cansa ' +
         'a quien te sigue en varias. Por debajo de 4 esta bien; por encima de 8 conviene ' +
-        'aprobar mas videos.</p>' +
+        'aprobar más videos.</p>' +
       '</details>' +
     '</div></article>';
 
@@ -2127,12 +2127,12 @@ function vistaCola() {
         (s.next
           ? (vencida
               ? '. El primero estaba previsto para ' + cuando(s.next) + ' y sigue sin salir'
-              : '. El proximo, ' + cuando(s.next))
+              : '. El próximo, ' + cuando(s.next))
           : '') + '.' +
       '</p>' +
       (vencida
-        ? '<details class="nota"><summary>Por que no ha salido</summary>' +
-          '<p>Estaba programado para una fecha que ya paso y nadie lo subio. ' +
+        ? '<details class="nota"><summary>Por qué no ha salido</summary>' +
+          '<p>Estaba programado para una fecha que ya paso y nadie lo subió. ' +
           'Revisa en Cuentas que la cuenta siga enlazada, y vuelve a repartir ' +
           'desde Inicio.</p>' +
           '</details>'
@@ -2150,7 +2150,7 @@ function cuando(iso) {
   if (dias === 0) return 'hoy a las ' + hora;
   if (dias === 1) return 'mañana a las ' + hora;
   if (dias < 0) return 'el ' + new Date(iso).toLocaleDateString('es') + ' a las ' + hora;
-  return 'en ' + dias + ' dias a las ' + hora;
+  return 'en ' + plural(dias, 'día') + ' a las ' + hora;
 }
 
 function hora_(iso) {
@@ -2193,7 +2193,7 @@ function tarjetaDiagnostico() {
   return '<article class="card flat"><div class="body">' +
       '<button class="chip" data-run="doctor"' + (ocupado ? ' disabled' : '') + '>' +
       'Probar el sistema</button>' +
-      '<details class="nota"><summary>Cuando usar esto</summary>' +
+      '<details class="nota"><summary>Cuándo usar esto</summary>' +
         '<p>Comprueba que el programa tiene todo lo que necesita para funcionar. ' +
         'Sirve cuando algo falla y no sabes por que.</p>' +
       '</details>' +
@@ -2206,9 +2206,9 @@ function vistaRegistro() {
 
   if (r.runs.length === 0) {
     return tarjetaDiagnostico() +
-      '<div class="empty"><b>Aun no hay nada</b>' +
-      'Cada tarea que haga el programa quedara anotada aqui ' +
-      'con lo que uso, lo que creo y lo que costo.</div>';
+      '<div class="empty"><b>Aún no hay nada</b>' +
+      'Cada tarea que haga el programa quedará anotada aquí ' +
+      'con lo que uso, lo que creo y lo que costó.</div>';
   }
 
   const t = r.totals;
@@ -2237,7 +2237,7 @@ function vistaRegistro() {
     '</table></article>';
   }
 
-  html += seccion('&#9776;', 'Una por una', 'Cada envio con su hora y su cuenta, por dia.') +
+  html += seccion('&#9776;', 'Una por una', 'Cada envío con su hora y su cuenta, por día.') +
     r.runs.map(run =>
       '<article class="card' + (run.status === 'error' ? ' job error' : '') + '"><div class="body">' +
         '<div class="joghead">' +
@@ -2315,8 +2315,8 @@ function opciones(lista, actual) {
  */
 const BLOQUES = [
   {
-    icono: '&#9636;', titulo: 'Cuanto se publica',
-    pie: 'Cuantos videos salen al dia y en que horario.',
+    icono: '&#9636;', titulo: 'Cuánto se publica',
+    pie: 'Cuántos videos salen al día y en qué horario.',
     campos: [
       /*
        * "Cuentas" YA NO SE ESCRIBE AQUI.
@@ -2326,7 +2326,7 @@ const BLOQUES = [
        * enlazada con TikTok, y toda la seccion calculaba sobre esas trece.
        * Ahora lo cuenta el servidor y se enseña arriba, con su explicacion.
        */
-      { key: 'postsPerDay',  texto: 'Veces al dia en cada una', tipo: 'num' },
+      { key: 'postsPerDay',  texto: 'Veces al día en cada una', tipo: 'num' },
       { key: 'dayStartHour', texto: 'Desde las',                tipo: 'hora' },
       { key: 'dayEndHour',   texto: 'Hasta las',                tipo: 'hora' },
       /*
@@ -2350,12 +2350,12 @@ const BLOQUES = [
        * Las opciones las manda el servidor desde publish/planes.ts; aqui solo
        * se marca que este campo las usa, igual que hace la tipografia.
        */
-      { key: 'maxCuentas', texto: 'Tope de cuentas, segun tu plan', planes: true },
+      { key: 'maxCuentas', texto: 'Tope de cuentas, según tu plan', planes: true },
     ],
   },
   {
     icono: '&#9888;', titulo: 'Para que no parezca spam',
-    pie: 'Si el mismo video sale muchas veces seguidas, TikTok lo nota. Cuanto mas lo separas, mas videos distintos necesitas.',
+    pie: 'Si el mismo video sale muchas veces seguidas, TikTok lo nota. Cuanto más lo separas, más videos distintos necesitas.',
     campos: [
       {
         key: 'clipCooldownMinutes',
@@ -2368,12 +2368,12 @@ const BLOQUES = [
         key: 'accountRepeatHours',
         texto: 'Antes de repetirlo en la misma cuenta, esperar',
         tipo: 'lista',
-        lista: [[24, '1 dia'], [48, '2 dias'], [72, '3 dias'],
-                [120, '5 dias'], [168, '1 semana'], [336, '2 semanas']],
+        lista: [[24, '1 día'], [48, '2 días'], [72, '3 días'],
+                [120, '5 días'], [168, '1 semana'], [336, '2 semanas']],
       },
       {
         key: 'jitterMinutes',
-        texto: 'Cambiar un poco la hora cada dia',
+        texto: 'Cambiar un poco la hora cada día',
         tipo: 'lista',
         lista: [[0, 'no, siempre igual'], [15, 'hasta 15 minutos'],
                 [30, 'hasta media hora'], [40, 'hasta 40 minutos'], [60, 'hasta 1 hora']],
@@ -2392,20 +2392,29 @@ function vistaFlujo() {
   // Las dos consecuencias, arriba y en cristiano. Son lo unico que hay que
   // mirar despues de tocar cualquier perilla.
   // La cifra que responde a todo, sola y enorme. El resto es contexto.
+  const cuentasN = d.settings.accounts;
+  const dias = m.repeatDays;
+  const usosVentana = Math.min(cuentasN, Math.floor(m.maxUsesPerClip * dias));
   let html = '<article class="card hero"><div class="body" style="text-align:center">' +
-      '<p class="ante">Necesitas cada dia</p>' +
+      '<p class="ante">Necesitas cada día</p>' +
       '<p class="cifra acc" style="margin:0">' + m.clipsNeededPerDay + '</p>' +
-      '<p style="margin:var(--s2) 0 0;font-size:var(--t-cuerpo)">videos distintos</p>' +
-      '<p class="reason" style="margin:var(--s3) 0 0">Para llenar ' + m.slotsPerDay +
-        ' subidas al dia entre ' + d.settings.accounts + ' cuenta' +
-        (d.settings.accounts === 1 ? '' : 's') + ' que puede' +
-        (d.settings.accounts === 1 ? '' : 'n') + ' publicar.</p>' +
+      '<p style="margin:var(--s2) 0 0;font-size:var(--t-cuerpo)">' +
+        (m.clipsNeededPerDay === 1 ? 'video distinto nuevo' : 'videos distintos nuevos') + '</p>' +
+      '<p class="reason" style="margin:var(--s3) 0 0">Y tener ' + plural(m.clipsEnRotacion, 'video distinto', 'videos distintos') +
+        ' en reserva para ' + plural(m.slotsPerDay, 'subida', 'subidas') + ' al día entre ' +
+        plural(cuentasN, 'cuenta que puede', 'cuentas que pueden') + ' publicar.</p>' +
       '<details class="nota" style="text-align:left">' +
-        '<summary>Por que ' + m.clipsNeededPerDay + ' y no ' + m.slotsPerDay + '</summary>' +
-        '<p>El mismo video se sube en varias cuentas, asi que no hace falta uno por subida. ' +
-        'Con ' + d.settings.clipCooldownMinutes + ' min de separacion y una franja de ' +
-        m.windowHours + ' h, cada video cabe ' + m.maxUsesPerClip + ' veces al dia. ' +
-        m.slotsPerDay + ' entre ' + m.maxUsesPerClip + ' son ' + m.clipsNeededPerDay + '.</p>' +
+        '<summary>¿Por qué ' + m.clipsNeededPerDay + '?</summary>' +
+        '<p>Una cuenta no repite un video hasta pasados ' + plural(dias, 'día') + ', y entre dos cuentas el mismo ' +
+        'video espera ' + d.settings.clipCooldownMinutes + ' min. En una franja de ' + m.windowHours + ' h, un video cabe ' +
+        plural(m.maxUsesPerClip, 'vez', 'veces') + ' al día.</p>' +
+        '<p class="dato" style="font-size:var(--t-meta)">' +
+          'reserva = ' + cuentasN + ' cuentas × ' + d.settings.postsPerDay + ' al día × ' + dias + ' días ÷ ' + usosVentana +
+          ' usos por video = ' + m.clipsEnRotacion + '<br>' +
+          'nuevos al día = ' + m.clipsEnRotacion + ' ÷ ' + dias + ' días = ' + m.clipsNeededPerDay +
+        '</p>' +
+        '<p>Los usos por video son lo menor entre el número de cuentas (' + cuentasN + ') y las veces que cabe en ' +
+        plural(dias, 'día') + ' (' + m.maxUsesPerClip + ' × ' + dias + ').</p>' +
       '</details>' +
     '</div></article>';
 
@@ -2427,12 +2436,12 @@ function vistaFlujo() {
       '</div>' +
       '<p class="reason" style="margin:var(--s3) 0 0">' +
         (c.enlazadas === 0
-          ? 'Ninguna cuenta esta enlazada con TikTok todavia, asi que el plan de arriba es el minimo. '
+          ? 'Ninguna cuenta esta enlazada con TikTok todavía, así que el plan de arriba es el mínimo. '
           : sinEnlazar > 0
             ? sinEnlazar + ' cuenta' + (sinEnlazar === 1 ? '' : 's') + ' sin enlazar no cuenta' +
               (sinEnlazar === 1 ? '' : 'n') + ' para el plan: sin permiso de TikTok no pueden subir nada. '
-            : 'Todas las cuentas creadas estan enlazadas. ') +
-        'Este numero no se escribe: sale de las cuentas enlazadas.' +
+            : 'Todas las cuentas creadas están enlazadas. ') +
+        'Este número no se escribe: sale de las cuentas enlazadas.' +
       '</p>' +
       '<div class="chips" style="margin-top:var(--s3)">' +
         '<button class="chip" data-ir="plataformas">Ir a Cuentas</button>' +
@@ -2443,8 +2452,8 @@ function vistaFlujo() {
   if (faltan > 0) {
     html += '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
       '<b>Te faltan videos.</b> Tienes ' + d.approved + ' aprobado' + (d.approved === 1 ? '' : 's') +
-      ' y hacen falta ' + m.clipsNeededPerDay + ' al dia. Hasta llegar ahi, los mismos videos ' +
-      'se repetiran mas de lo que deberian.' +
+      ' y hacen falta ' + m.clipsNeededPerDay + ' al día. Hasta llegar ahí, los mismos videos ' +
+      'se repetiran más de lo que deberian.' +
     '</div></div></div>';
   }
 
@@ -2490,7 +2499,7 @@ function vistaFlujo() {
       '</div>' +
       '<p class="reason" style="margin:var(--s3) 0 0">Al guardar se cambian los horarios. ' +
       'Las cuentas no se tocan: siguen siendo las mismas. ' +
-      'Despues, entra en Proceso y pulsa "Rehacer el reparto".</p>' +
+      'Después, entra en Proceso y pulsa "Rehacer el reparto".</p>' +
     '</div></article>';
 
   return html;
@@ -2523,7 +2532,7 @@ async function guardarFlujo(valores) {
     // entre "ha pasado algo" y "no se si le he dado bien".
     const a = state.settings.applied;
     avisar(a && a.added + a.deactivated > 0
-      ? 'Guardado. ' + a.kept + ' cuentas siguen igual, ' + a.added + ' nuevas, ' + a.deactivated + ' desactivadas.'
+      ? 'Guardado. ' + plural(a.kept, 'cuenta sigue', 'cuentas siguen') + ' igual, ' + plural(a.added, 'nueva', 'nuevas') + ', ' + plural(a.deactivated, 'desactivada', 'desactivadas') + '.'
       : 'Guardado. Los horarios se han recalculado.');
   } catch (error) {
     alert(error.message);
@@ -2546,25 +2555,25 @@ async function guardarFlujo(valores) {
  */
 const CORTES = [
   {
-    icono: '&#8942;', titulo: 'Cuanto dura cada corte',
-    pie: 'Los momentos que encuentre se ajustaran a esta horquilla. Mas corto retiene mejor; mas largo deja contar algo entero.',
+    icono: '&#8942;', titulo: 'Cuánto dura cada corte',
+    pie: 'Los momentos que encuentre se ajustaran a esta horquilla. Más corto retiene mejor; más largo deja contar algo entero.',
     campos: [
       {
-        key: 'minSec', texto: 'Como minimo',
+        key: 'minSec', texto: 'Como mínimo',
         lista: [[10, '10 segundos'], [15, '15 segundos'], [20, '20 segundos'],
                 [30, 'medio minuto'], [45, '45 segundos'], [60, '1 minuto']],
       },
       {
-        key: 'maxSec', texto: 'Como maximo',
+        key: 'maxSec', texto: 'Como máximo',
         lista: [[30, 'medio minuto'], [45, '45 segundos'], [60, '1 minuto'],
                 [90, 'minuto y medio'], [120, '2 minutos'], [180, '3 minutos']],
       },
     ],
   },
   {
-    icono: '&#9636;', titulo: 'Cuantos busca',
+    icono: '&#9636;', titulo: 'Cuántos busca',
     pie: 'El directo se parte en trozos y se buscan los mejores momentos de cada uno, uno por uno. ' +
-         'Trozos mas pequeños reparten la atencion por todo el video y encuentran mas, pero son mas pasadas y cuestan mas.',
+         'Trozos más pequeños reparten la atención por todo el video y encuentran más, pero son más pasadas y cuestan más.',
     campos: [
       {
         key: 'perWindow', texto: 'Momentos por trozo, como mucho',
@@ -2578,12 +2587,12 @@ const CORTES = [
     ],
   },
   {
-    icono: '&#9647;', titulo: 'Como salen los subtitulos',
-    pie: 'En TikTok la mayoria mira sin sonido, asi que quitarlos casi siempre cuesta visitas. ' +
+    icono: '&#9647;', titulo: 'Cómo salen los subtítulos',
+    pie: 'En TikTok la mayoria mira sin sonido, así que quitarlos casi siempre cuesta visitas. ' +
          'La altura los deja por encima de la franja donde TikTok pone el texto y los botones.',
     campos: [
       {
-        key: 'subtitles', texto: 'Subtitulos quemados en el video',
+        key: 'subtitles', texto: 'Subtítulos quemados en el video',
         lista: [[1, 'si'], [0, 'no']],
       },
       // La lista de fuentes la manda el servidor: es la misma que valida, asi
@@ -2605,28 +2614,28 @@ const CORTES = [
         lista: [[0, 'sin borde'], [3, 'fino'], [7, 'normal'], [12, 'grueso'], [18, 'muy grueso']],
       },
       {
-        key: 'subPalabras', texto: 'Palabras por rotulo',
-        lista: [[1, '1, muy rapido'], [2, '2'], [3, '3, normal'], [4, '4'],
+        key: 'subPalabras', texto: 'Palabras por rótulo',
+        lista: [[1, '1, muy rápido'], [2, '2'], [3, '3, normal'], [4, '4'],
                 [5, '5'], [7, '7, frases enteras']],
       },
       {
-        key: 'subAnimacion', texto: 'Animacion al aparecer',
+        key: 'subAnimacion', texto: 'Animación al aparecer',
         lista: [[1, 'si'], [0, 'no']],
       },
     ],
   },
   {
-    icono: '&#9650;', titulo: 'El rotulo de arriba',
+    icono: '&#9650;', titulo: 'El rótulo de arriba',
     pie: 'Una frase quemada en la parte de arriba del video, fija durante todo el clip. ' +
-         'No es lo mismo que el texto de la publicacion: ese se lee debajo y quien pasa deprisa no llega a verlo. ' +
-         'El rotulo se ve en el primer segundo, que es lo que decide si alguien se queda. ' +
+         'No es lo mismo que el texto de la publicación: ese se lee debajo y quien pasa deprisa no llega a verlo. ' +
+         'El rótulo se ve en el primer segundo, que es lo que decide si alguien se queda. ' +
          '{titulo} es el pie que propone el programa para ese clip.',
     campos: [
       {
-        key: 'tituloActivo', texto: 'Rotulo quemado en el video',
+        key: 'tituloActivo', texto: 'Rótulo quemado en el video',
         lista: [[1, 'si'], [0, 'no']],
       },
-      { key: 'tituloTexto', texto: 'Que dice', textoLibre: true, pista: '{titulo}' },
+      { key: 'tituloTexto', texto: 'Qué dice', textoLibre: true, pista: '{titulo}' },
       {
         key: 'tituloArriba', texto: 'Altura desde arriba',
         lista: [[120, 'arriba del todo'], [180, 'alto'], [240, 'normal'],
@@ -2645,7 +2654,7 @@ const CORTES = [
     ],
   },
   {
-    icono: '&#9998;', titulo: 'El texto de la publicacion',
+    icono: '&#9998;', titulo: 'El texto de la publicación',
     pie: 'Lo que acompaña al video en TikTok. {titulo} es el pie que propone el programa para ese clip ' +
          'y {hashtags} las etiquetas. Las fijas se añaden a todos los videos, sin repetir las que ya vengan.',
     campos: [
@@ -2659,28 +2668,28 @@ const CORTES = [
   },
   {
     icono: '&#9741;', titulo: 'Al publicar',
-    pie: 'Directo publica en el perfil; borrador lo deja en la bandeja del movil para que lo suba el titular. ' +
+    pie: 'Directo publica en el perfil; borrador lo deja en la bandeja del móvil para que lo suba el titular. ' +
          'La API propia de TikTok no puede publicar directo hasta pasar la auditoria. ' +
-         'El ritmo son topes por cuenta: TikTok admite hasta 6 por minuto y 15 al dia.',
+         'El ritmo son topes por cuenta: TikTok admite hasta 6 por minuto y 15 al día.',
     campos: [
       {
-        key: 'proveedor', texto: 'Por donde se publica',
+        key: 'proveedor', texto: 'Por dónde se publica',
         lista: [['upload-post', 'upload-post'], ['tiktok', 'API propia de TikTok']],
         texto_valor: true,
       },
       {
-        key: 'modo', texto: 'Que se hace con el video',
+        key: 'modo', texto: 'Qué se hace con el video',
         lista: [['direct', 'publicarlo'], ['draft', 'dejarlo en la bandeja']],
         texto_valor: true,
       },
       {
-        key: 'privacidad', texto: 'Quien lo ve',
+        key: 'privacidad', texto: 'Quién lo ve',
         lista: [['PUBLIC_TO_EVERYONE', 'todo el mundo'], ['MUTUAL_FOLLOW_FRIENDS', 'amigos'],
                 ['FOLLOWER_OF_CREATOR', 'seguidores'], ['SELF_ONLY', 'solo yo, en privado']],
         texto_valor: true,
       },
       {
-        key: 'maxPorDia', texto: 'Como mucho al dia, por cuenta',
+        key: 'maxPorDia', texto: 'Como mucho al día, por cuenta',
         lista: [[3, '3'], [5, '5'], [8, '8'], [10, '10'], [13, '13, normal'], [15, '15, el tope']],
       },
       {
@@ -2722,8 +2731,8 @@ function pintarPlantillas(d) {
   return seccion('&#9737;', 'Plantillas', 'Guarda un juego de ajustes con nombre para volver a el de un clic.') +
     '<article class="card"><div class="body">' +
       (lista.length === 0
-        ? '<p class="reason" style="margin:0 0 var(--s3)">Ninguna todavia. Deja los ajustes de abajo como los quieras ' +
-          'y guardalos con un nombre; asi puedes alternar entre, por ejemplo, ' +
+        ? '<p class="reason" style="margin:0 0 var(--s3)">Ninguna todavía. Deja los ajustes de abajo como los quieras ' +
+          'y guardalos con un nombre; así puedes alternar entre, por ejemplo, ' +
           'cortes de directo de juego y de podcast sin tocar ocho desplegables.</p>'
         : '<div class="chips" style="margin-bottom:var(--s3)">' +
             lista.map(p =>
@@ -2772,10 +2781,10 @@ function vistaPrevia(d) {
   const m = d.muestra;
 
   if (!m) {
-    return seccion('&#9654;', 'Vista previa', 'Como queda un clip tuyo con estos ajustes. Cambia algo y se actualiza al momento, sin guardar.') +
+    return seccion('&#9654;', 'Vista previa', 'Cómo queda un clip tuyo con estos ajustes. Cambia algo y se actualiza al momento, sin guardar.') +
       '<article class="card"><div class="body">' +
-        '<p class="hook">Todavia no hay ningun momento</p>' +
-        '<p class="reason" style="margin-bottom:0">Cuando proceses un video, aqui veras ' +
+        '<p class="hook">Todavía no hay ningún momento</p>' +
+        '<p class="reason" style="margin-bottom:0">Cuando proceses un video, aquí verás ' +
         'como queda con estos ajustes antes de gastar GPU en renderizarlo.</p>' +
       '</div></article>';
   }
@@ -2797,11 +2806,21 @@ function vistaPrevia(d) {
      * reproductor. Aqui hay UNO solo; en Revisar hay cuarenta y cinco y
      * arrancarlos todos seria insufrible.
      */
-    ? '<video class="pv-video" autoplay muted loop playsinline preload="none" data-src="/video/' +
-        encodeURIComponent(m.sourceId) + '/' + encodeURIComponent(m.clipId) + '"></video>'
-    : '<div class="pv-sinvideo">sin copia en la nube<br>de este momento</div>';
+    /*
+     * FASE 5: primero el fotograma LIMPIO, sin subtitulos.
+     *
+     * El video subido ya lleva los subtitulos quemados, y con los de la vista
+     * previa encima se veian dos veces. El fotograma es el encuadre real del
+     * clip sin texto: lo que se ve encima es exactamente lo que saldra con
+     * estos ajustes. Si un clip todavia no tiene fotograma (armado antes de
+     * esta fase), se cae al video, como antes.
+     */
+    ? '<img class="pv-video pv-foto" alt="Fotograma del clip" src="/fotograma/' +
+        encodeURIComponent(m.sourceId) + '/' + encodeURIComponent(m.clipId) + '"' +
+        ' data-video="/video/' + encodeURIComponent(m.sourceId) + '/' + encodeURIComponent(m.clipId) + '">'
+    : '<div class="pv-sinvideo">Todavía no hay ningún clip subido.<br>La vista previa usará el primero que se arme.</div>';
 
-  return seccion('&#9654;', 'Vista previa', 'Como queda un clip tuyo con estos ajustes. Cambia algo y se actualiza al momento, sin guardar.') +
+  return seccion('&#9654;', 'Vista previa', 'Cómo queda un clip tuyo con estos ajustes. Cambia algo y se actualiza al momento, sin guardar.') +
     '<article class="card ancho"><div class="body">' +
       '<div class="pv-fila">' +
         '<div class="pv-marco">' +
@@ -2814,9 +2833,10 @@ function vistaPrevia(d) {
            */
           capaHtml('titulo', a, m) +
           capaHtml('sub', a, m) +
+          '<div class="pv-zona" aria-hidden="true"><span>Lo tapa TikTok</span></div>' +
         '</div>' +
         '<div class="pv-datos">' +
-          '<p class="ante">Texto de la publicacion</p>' +
+          '<p class="ante">Texto de la publicación</p>' +
           '<p class="pv-texto" id="pv-texto"></p>' +
 
           /*
@@ -2827,29 +2847,29 @@ function vistaPrevia(d) {
            * precisamente esto: mirando el marco no se sabe si el rotulo esta
            * apagado o es que el clip no tiene pie, ni con que tipografia sale.
            */
-          '<p class="ante" style="margin-top:var(--s4)">Que lleva este video</p>' +
+          '<p class="ante" style="margin-top:var(--s4)">Qué lleva este video</p>' +
           '<ul class="pv-lista">' +
             '<li><span class="punto-estado ' + (a.subtitles ? 'si' : 'nada') + '"></span>' +
               (a.subtitles
-                ? 'Subtitulos en ' + esc(a.subFont) + ', de ' + a.subPalabras +
+                ? 'Subtítulos en ' + esc(a.subFont) + ', de ' + a.subPalabras +
                   (a.subPalabras === 1 ? ' palabra' : ' palabras')
-                : 'Sin subtitulos') + '</li>' +
+                : 'Sin subtítulos') + '</li>' +
             '<li><span class="punto-estado ' + (a.tituloActivo ? 'si' : 'nada') + '"></span>' +
-              (a.tituloActivo ? 'Rotulo arriba' : 'Sin rotulo arriba') + '</li>' +
+              (a.tituloActivo ? 'Rótulo arriba' : 'Sin rótulo arriba') + '</li>' +
             '<li><span class="punto-estado ' + (a.subAnimacion && a.subtitles ? 'si' : 'nada') + '"></span>' +
-              (a.subAnimacion && a.subtitles ? 'Los rotulos entran animados' : 'Sin animacion') + '</li>' +
+              (a.subAnimacion && a.subtitles ? 'Los rótulos entran animados' : 'Sin animación') + '</li>' +
           '</ul>' +
 
-          '<p class="ante" style="margin-top:var(--s4)">De donde sale</p>' +
+          '<p class="ante" style="margin-top:var(--s4)">De dónde sale</p>' +
           '<p class="reason" style="margin:0">' + esc(m.sourceId) + ' / ' + esc(m.clipId) + '</p>' +
         '</div>' +
       '</div>' +
       '<p class="reason" style="margin:var(--s4) 0 0">' +
         (a.subtitles || a.tituloActivo
-          ? 'Arrastra el texto para colocarlo, o pulsalo y usa las flechas. Es aproximado: ' +
-            'el render reparte las lineas a su manera. Sirve para ver si se lee, si tapa la ' +
+          ? 'Arrastra el texto para colocarlo, o púlsalo y usa las flechas. Es aproximado: ' +
+            'el render reparte las líneas a su manera. Sirve para ver si se lee, si tapa la ' +
             'cara y si el color pega.'
-          : 'El rotulo y los subtitulos estan apagados, asi que el video sale limpio.') +
+          : 'El rótulo y los subtítulos están apagados, así que el video sale limpio.') +
       '</p>' +
     '</div></article>';
 }
@@ -2862,25 +2882,87 @@ function vistaPrevia(d) {
  * debe coincidir con lo que se publica: si divergen, la vista previa miente,
  * que es peor que no tenerla.
  */
+/*
+ * El texto de la publicacion, para la vista previa de Estilo.
+ *
+ * Es una copia de construirTexto (src/publish/texto.ts) con las mismas
+ * reglas: sin repetir etiquetas (ni por mayusculas ni por tildes, ni las que
+ * ya estan en la descripcion), sin trozos de otra etiqueta, como mucho 5 (las
+ * fijas primero) y sin cortar nada a medias. verify-fase5 comprueba que las
+ * dos dan lo mismo.
+ */
 function textoPublicacion(a, m) {
-  const limpiar = (s) => String(s).trim().replace(/^#+/, '').replace(/\\s+/g, '');
-  const vistas = new Set();
-  const todas = [];
-  const fuentes = [...(m.hashtags || []), ...String(a.hashtagsFijos || '').split(',')];
-  for (const bruto of fuentes) {
-    const h = limpiar(bruto);
-    if (h === '' || vistas.has(h.toLowerCase())) continue;
-    vistas.add(h.toLowerCase());
-    todas.push('#' + h);
+  const MAX = 5;
+  const limpiar = (x) => String(x).trim().replace(/^#+/, '').replace(/\\s+/g, '');
+  const clave = (h) => h.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
+  const caption = m.caption || '';
+  const fijas = String(a.hashtagsFijos || '').split(',').map(limpiar).filter(h => h.length >= 2);
+  const clip = (m.hashtags || []).map(limpiar).filter(h => h.length >= 2);
+  const claves = [...fijas, ...clip].map(clave);
+  const forma = new Map();
+  for (const h of [...clip, ...fijas]) if (!forma.has(clave(h))) forma.set(clave(h), h);
+  const fragmento = (c) => claves.some(o => o !== c && o.length > c.length && o.startsWith(c));
+  const vistas = new Set([...caption.matchAll(/#([\\p{L}\\p{N}_]+)/gu)].map(x => clave(x[1] || '')));
+  const reservadas = [];
+  for (const h of fijas) {
+    const c = clave(h);
+    if (reservadas.length >= MAX || vistas.has(c) || fragmento(c)) continue;
+    vistas.add(c);
+    reservadas.push(c);
   }
-  return String(a.textoPlantilla || '{titulo} {hashtags}')
-    .replaceAll('{titulo}', m.caption || '')
+  const delClip = [];
+  for (const h of clip) {
+    const c = clave(h);
+    if (reservadas.length + delClip.length >= MAX) break;
+    if (vistas.has(c) && !reservadas.includes(c)) continue;
+    if (fragmento(c)) continue;
+    if (reservadas.includes(c)) reservadas.splice(reservadas.indexOf(c), 1);
+    else vistas.add(c);
+    delClip.push(c);
+  }
+  const todas = [...delClip, ...reservadas].map(c => '#' + (forma.get(c) || c));
+  const texto = String(a.textoPlantilla || '{titulo} {hashtags}')
+    .replaceAll('{titulo}', caption)
     .replaceAll('{hashtags}', todas.join(' '))
     .replace(/[ \\t]+/g, ' ')
     .replace(/\\n{3,}/g, '\\n\\n')
-    .trim()
-    .slice(0, 2200);
+    .trim();
+  if (texto.length <= 2200) return texto;
+  const trozos = texto.split(/(\\s+)/);
+  while (trozos.join('').trimEnd().length > 2200 && trozos.length > 1) trozos.pop();
+  const r = trozos.join('').trimEnd();
+  return r.length <= 2200 ? r : r.slice(0, 2200);
 }
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest && e.target.closest('[data-rearmar]');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const r = await api('/api/ajustes/rearmar', { method: 'POST' });
+    avisar(r.clips === 0
+      ? 'No hay clips pendientes que volver a armar.'
+      : (r.clips === 1 ? 'Se vuelve a armar 1 clip.' : 'Se vuelven a armar ' + r.clips + ' clips.') +
+        ' Aparecerán en Revisar cuando estén listos.');
+  } catch (err) {
+    avisar(err.message);
+  }
+  b.disabled = false;
+});
+
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (!img || !img.classList || !img.classList.contains('pv-foto')) return;
+  const v = document.createElement('video');
+  v.className = 'pv-video';
+  v.autoplay = true;
+  v.muted = true;
+  v.loop = true;
+  v.playsInline = true;
+  v.preload = 'metadata';
+  v.src = img.dataset.video;
+  img.replaceWith(v);
+}, true);
 
 function vistaAjustes() {
   const d = state.ajustes;
@@ -2898,20 +2980,28 @@ function vistaAjustes() {
    */
   let html = d.ejemplo
     ? '<article class="card hero paso-1"><div class="body" style="text-align:center">' +
-        '<p class="ante">De tu video mas largo saldrian</p>' +
+        '<p class="ante">De tu video más largo saldrian</p>' +
         '<p class="cifra acc" style="margin:0">' + d.ejemplo.clips + '</p>' +
-        '<p style="margin:var(--s2) 0 0;font-size:var(--t-cuerpo)">momentos, mas o menos</p>' +
+        '<p style="margin:var(--s2) 0 0;font-size:var(--t-cuerpo)">momentos, más o menos</p>' +
         '<p class="reason" style="margin:var(--s3) 0 0">' +
           esc(d.ejemplo.titulo) + ', ' + d.ejemplo.minutos + ' min. ' +
           'De esos apruebas tu los que valgan.</p>' +
       '</div></article>'
     : '<article class="card paso-1"><div class="body">' +
-        '<p class="hook">Todavia no hay ningun video</p>' +
-        '<p class="reason" style="margin-bottom:0">Cuando subas uno, aqui te dire cuantos momentos ' +
+        '<p class="hook">Todavía no hay ningún video</p>' +
+        '<p class="reason" style="margin-bottom:0">Cuando subas uno, aquí te diré cuántos momentos ' +
         'saldrian con estos ajustes.</p>' +
       '</div></article>';
 
   html += vistaPrevia(d);
+  // Cambiar el estilo no rehace lo ya armado. Esto si, para lo que aun espera.
+  html += '<article class="card"><div class="body">' +
+    '<p class="hook" style="margin-top:0">Aplicar el estilo a lo que ya está armado</p>' +
+    '<p class="reason">Los clips ya armados conservan el estilo con el que se hicieron. ' +
+      'Con este botón se vuelven a armar los que aún esperan revisión; lo aprobado y lo descartado no se toca.</p>' +
+    '<div class="actions"><button class="act go" data-rearmar="1">' + ico('reintentar') +
+      'Volver a armar los clips pendientes</button></div>' +
+  '</div></article>';
   html += pintarPlantillas(d);
 
   html += CORTES.map(b =>
@@ -3002,14 +3092,14 @@ function vistaAjustes() {
 
   // Lo que NO se puede tocar, dicho en vez de fingido con un control apagado.
   html += '<article class="card flat"><div class="body">' +
-      '<details class="nota"><summary>Lo que no se puede cambiar todavia</summary>' +
-        '<p><b>El formato es vertical 9:16</b> y no hay otra opcion. El video se pone ' +
-        'a lo ancho con el fondo desenfocado detras, que es lo estandar en clips de ' +
+      '<details class="nota"><summary>Lo que no se puede cambiar todavía</summary>' +
+        '<p><b>El formato es vertical 9:16</b> y no hay otra opción. El video se pone ' +
+        'a lo ancho con el fondo desenfocado detrás, que es lo estandar en clips de ' +
         'directo y nunca corta la cabeza a nadie.</p>' +
-        '<p><b>No hay marca de agua.</b> No esta hecha; poner aqui un interruptor que ' +
+        '<p><b>No hay marca de agua.</b> No esta hecha; poner aquí un interruptor que ' +
         'no hace nada seria mentir.</p>' +
         '<p><b>Los momentos los elige el modelo leyendo lo que se dice</b>, no los picos ' +
-        'de volumen ni el chat. En un directo sin chat eso es lo unico que hay, y ' +
+        'de volumen ni el chat. En un directo sin chat eso es lo único que hay, y ' +
         'entiende el remate de una historia, que un pico de audio no.</p>' +
       '</details>' +
     '</div></article>';
@@ -3030,7 +3120,7 @@ const BOOLEANOS = new Set(['subtitles', 'subAnimacion', 'tituloActivo']);
 
 const BASE_CORTES = {
   minSec: 20, maxSec: 90, perWindow: 3, windowSec: 900,
-  subtitles: true, subFont: 'Impact', subSize: 72, subMargin: 380,
+  subtitles: true, subFont: 'Impact', subSize: 72, subMargin: 480,
   subColor: '#FFFFFF', subColorBorde: '#000000', subBorde: 7,
   subPalabras: 3, subAnimacion: true,
   tituloActivo: false, tituloTexto: '{titulo}', tituloArriba: 240, tituloTam: 64,
@@ -3049,7 +3139,7 @@ async function guardarAjustes(valores) {
     });
     render();
     const e = state.ajustes.ejemplo;
-    avisar(e ? 'Guardado. Saldrian unos ' + e.clips + ' momentos.' : 'Guardado.');
+    avisar(e ? 'Guardado. Saldrían unos ' + plural(e.clips, 'momento') + '.' : 'Guardado.');
   } catch (error) {
     alert(error.message);
   }
@@ -3161,7 +3251,7 @@ function vistaProyectos() {
       '<div class="stats" style="margin-top:var(--s3)">' +
         '<div><b>' + cuentas.length + '</b><span>Cuentas</span></div>' +
         '<div><b>' + suyas.length + '</b><span>Campañas</span></div>' +
-        '<div><b>' + suyas.reduce((n, k) => n + k.vods, 0) + '</b><span>VOD</span></div>' +
+        '<div><b>' + suyas.reduce((n, k) => n + k.vods, 0) + '</b><span>Videos</span></div>' +
       '</div>' +
 
       /*
@@ -3197,11 +3287,11 @@ function vistaProyectos() {
        * valor heredado: sin eso, "General" no dice nada y hay que ir a la otra
        * seccion a averiguar que implica.
        */
-      '<p class="reason" style="margin:var(--s4) 0 0">Su ritmo de publicacion</p>' +
+      '<p class="reason" style="margin:var(--s4) 0 0">Su ritmo de publicación</p>' +
       '<ul class="lista-campanas">' +
-        '<li><span class="nombre">Veces al dia</span>' +
+        '<li><span class="nombre">Veces al día</span>' +
           '<select data-pperfil="' + c.id + '" data-campo="postsPerDay">' +
-            opcionPerfil(c.perfil.postsPerDay, [1,2,3,4,5,6], general.postsPerDay, n => n + ' al dia') +
+            opcionPerfil(c.perfil.postsPerDay, [1,2,3,4,5,6], general.postsPerDay, n => n + ' al día') +
           '</select></li>' +
         '<li><span class="nombre">Desde las</span>' +
           '<select data-pperfil="' + c.id + '" data-campo="dayStartHour">' +
@@ -3217,7 +3307,7 @@ function vistaProyectos() {
         ? '<ul class="lista-campanas">' + suyas.map(k =>
             '<li>' +
               '<span class="nombre">' + esc(k.nombre) + '</span>' +
-              '<span class="badge">' + k.vods + ' VOD</span>' +
+              '<span class="badge">' + plural(k.vods, 'video') + '</span>' +
               '<select data-pestado="' + k.id + '" aria-label="Estado de ' + esc(k.nombre) + '">' +
                 ['activa', 'pausada', 'terminada'].map(e =>
                   '<option value="' + e + '"' + (k.estado === e ? ' selected' : '') + '>' + e + '</option>'
@@ -3227,7 +3317,7 @@ function vistaProyectos() {
                 'aria-label="Borrar la campaña ' + esc(k.nombre) + '">Borrar</button>' +
             '</li>'
           ).join('') + '</ul>'
-        : '<p class="reason" style="margin:var(--s3) 0 0">Sin campañas todavia.</p>') +
+        : '<p class="reason" style="margin:var(--s3) 0 0">Sin campañas todavía.</p>') +
 
       '<div class="fila-nueva" style="margin-top:var(--s3)">' +
         '<input id="nueva-campana-' + c.id + '" type="text" maxlength="80" ' +
@@ -3279,7 +3369,7 @@ function vistaProyectos() {
 
   return nuevo + fichas + pendientes +
     '<article class="card flat"><div class="body">' +
-      '<details class="nota"><summary>Como se reparte cada cosa</summary>' +
+      '<details class="nota"><summary>Cómo se reparte cada cosa</summary>' +
         '<p>Las <b>cuentas</b> cuelgan del cliente y las <b>campañas</b> agrupan sus videos. ' +
         'Es a proposito: una cuenta de TikTok sigue siendo suya entre lanzamientos, y colgarla ' +
         'de la campaña obligaria a volver a autorizarla cada vez que empieza una nueva.</p>' +
@@ -3348,15 +3438,15 @@ function vistaPlataformas() {
   ).join('') + '</div>' + listaCuentas() +
 
   '<article class="card flat"><div class="body">' +
-    '<details class="nota"><summary>Que pasa al enlazar una cuenta</summary>' +
+    '<details class="nota"><summary>Qué pasa al enlazar una cuenta</summary>' +
       '<p>El programa <b>nunca ve tu contraseña</b>. Al pulsar Enlazar se abre tiktok.com, ' +
-      'escribes la clave alli, y lo que vuelve es un permiso revocable desde los ajustes ' +
+      'escribes la clave allí, y lo que vuelve es un permiso revocable desde los ajustes ' +
       'de esa misma cuenta.</p>' +
-      '<p>Usa una <b>ventana de incognito</b> para cada cuenta. Si ya tienes otra sesion de ' +
+      '<p>Usa una <b>ventana de incognito</b> para cada cuenta. Si ya tienes otra sesión de ' +
       'TikTok abierta, TikTok autorizara esa sin preguntarte cual.</p>' +
       '<p><b>Comprobar</b> pregunta a TikTok por el perfil. Sirve para ver que el permiso ' +
       'sigue vivo y para refrescar el @. No dice si la app paso la auditoria: eso solo lo ' +
-      'revela intentar una publicacion directa.</p>' +
+      'revela intentar una publicación directa.</p>' +
     '</details>' +
   '</div></article>';
 }
@@ -3422,7 +3512,7 @@ function listaCuentas() {
       if (!Number.isFinite(tope)) return '';
       const libres = Math.max(0, tope - d.cuentas.length);
       return '<p class="reason" style="margin:0 0 var(--s3)">' +
-        d.cuentas.length + ' de ' + tope + ' cuentas de tu plan. ' +
+        d.cuentas.length + ' de ' + plural(tope, 'cuenta') + ' de tu plan. ' +
         (libres === 0
           ? 'No queda hueco: sube de plan en upload-post y elige el nuevo en Horarios.'
           : 'Te quedan ' + plural(libres, 'cuenta') + ' por crear.') +
@@ -3451,10 +3541,10 @@ function listaCuentas() {
     '<p class="reason" style="margin-top:0">' +
       (porUploadPost
         ? 'Se publica por <b>upload-post</b>. Reciben videos las <b>' + activas + '</b> cuentas ' +
-          'activas, y cada una necesita un perfil con ese mismo nombre dado de alta alli. ' +
+          'activas, y cada una necesita un perfil con ese mismo nombre dado de alta allí. ' +
           'Pausa las que no tengan perfil o fallaran una por una.'
         : 'Se publica por la <b>API de TikTok</b>. Solo reciben videos las cuentas activas ' +
-          'que ademas hayan autorizado la app.') +
+          'que además hayan autorizado la app.') +
     '</p>' +
     /*
      * Herramientas solo a partir del umbral. Ver CUENTAS_UMBRAL.
@@ -3486,7 +3576,7 @@ function listaCuentas() {
         '</ul>' +
         (ocultas > 0
           ? '<p class="reason" style="margin:var(--s3) 0 0">' +
-            'Y ' + plural(ocultas, 'cuenta') + ' mas. Busca o filtra para verlas.</p>'
+            'Y ' + plural(ocultas, 'cuenta') + ' más. Busca o filtra para verlas.</p>'
           : '');
     })() +
   '</div></article>';
@@ -3535,16 +3625,16 @@ function vistaMetricas() {
   return (sinMedir
     ? '<div class="card"><div class="body"><div class="warn" style="margin:0">' +
         '<b>Hay ' + m.published + ' video(s) entregados pero ninguna medicion.</b> ' +
-        'Los ceros de abajo no significan que nadie los vea: significan que todavia ' +
+        'Los ceros de abajo no significan que nadie los vea: significan que todavía ' +
         'no hemos podido preguntarle a TikTok.' +
       '</div>' +
-      '<details class="nota" style="margin-top:var(--s3)"><summary>Que falta para tener cifras</summary>' +
-        '<p><b>El permiso de lectura.</b> Las cuentas estan autorizadas para publicar, ' +
-        'pero no para leer estadisticas. Eso es otro permiso (<i>video.list</i>) que hay ' +
-        'que añadir en el portal de TikTok y despues volver a autorizar cada cuenta: ' +
+      '<details class="nota" style="margin-top:var(--s3)"><summary>Qué falta para tener cifras</summary>' +
+        '<p><b>El permiso de lectura.</b> Las cuentas están autorizadas para publicar, ' +
+        'pero no para leer estadísticas. Eso es otro permiso (<i>video.list</i>) que hay ' +
+        'que añadir en el portal de TikTok y después volver a autorizar cada cuenta: ' +
         'un permiso ya concedido no se amplia solo.</p>' +
         '<p><b>Y que esten publicados de verdad.</b> Un video que sigue esperando en la ' +
-        'bandeja de entrada del movil no es una publicacion todavia, asi que no tiene ' +
+        'bandeja de entrada del móvil no es una publicación todavía, así que no tiene ' +
         'cifras que consultar.</p>' +
       '</details>' +
     '</div></div>'
@@ -3853,7 +3943,7 @@ async function lanzar(kind, params) {
      * entre "esta roto" y "esta esperando".
      */
     if (r?.trabajador && !r.trabajador.vivo) {
-      avisar('Apuntado. Empezara en cuanto enciendas el ordenador que procesa los videos.');
+      avisar('Apuntado. Empezará en cuanto enciendas el ordenador que procesa los videos.');
     }
   } catch (error) {
     avisar(error.message);
@@ -4049,7 +4139,7 @@ document.addEventListener('click', async e => {
        * retorno, el usuario se quedaria en ella sin forma obvia de regresar.
        */
       window.open(r.url, '_blank', 'noopener');
-      avisar('Autoriza en la pestaña nueva. Usa incognito si tienes otra sesion abierta.');
+      avisar('Autoriza en la pestaña nueva. Usa incognito si tienes otra sesión abierta.');
     } catch (err) {
       avisar(err.message);
     }
@@ -4064,7 +4154,7 @@ document.addEventListener('click', async e => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ accion: 'revisar', id: revisarCuenta.dataset.crevisar }),
       });
-      avisar('@' + r.username + ' responde. Maximo ' + r.maxDurationSec + 's por video.');
+      avisar('@' + r.username + ' responde. Máximo ' + r.maxDurationSec + 's por video.');
       refrescar();
     } catch (err) {
       avisar(err.message);
@@ -4082,7 +4172,7 @@ document.addEventListener('click', async e => {
   const quitarVod = e.target.closest('[data-quitar-vod]');
   if (quitarVod) {
     const id = quitarVod.dataset.quitarVod;
-    if (!confirm('Quitar ' + id + ' de la lista. Solo se puede porque no llego a dar ningun momento. Seguir?')) return;
+    if (!confirm('Quitar ' + id + ' de la lista. Solo se puede porque no llego a dar ningún momento. Seguir?')) return;
     try {
       const r = await api('/api/sources/' + encodeURIComponent(id), { method: 'DELETE' });
       avisar(r.mensaje);
@@ -4142,7 +4232,7 @@ document.addEventListener('click', async e => {
 
   const olvidar = e.target.closest('[data-colvidar]');
   if (olvidar) {
-    if (!confirm('Desenlazar esta cuenta. Tendras que volver a autorizarla en tiktok.com para publicar. Seguir?')) return;
+    if (!confirm('Desenlazar esta cuenta. Tendrás que volver a autorizarla en tiktok.com para publicar. Seguir?')) return;
     try {
       const r = await api('/api/cuentas', {
         method: 'POST',
@@ -4240,7 +4330,7 @@ document.addEventListener('click', async e => {
   const aplicar = e.target.closest('[data-plantilla]');
   if (aplicar && !aplicar.disabled) {
     plantillaAccion('/api/plantillas/' + aplicar.dataset.plantilla + '/aplicar', { method: 'POST' },
-      d => 'Aplicada. ' + (d.ejemplo ? 'Saldrian unos ' + d.ejemplo.clips + ' momentos.' : ''));
+      d => 'Aplicada. ' + (d.ejemplo ? 'Saldrían unos ' + plural(d.ejemplo.clips, 'momento') + '.' : ''));
     return;
   }
 
@@ -4314,7 +4404,7 @@ function subir(file) {
 
   xhr.addEventListener('error', () => {
     barra.hidden = true;
-    texto.textContent = 'Se corto la conexion durante la subida.';
+    texto.textContent = 'Se corto la conexión durante la subida.';
   });
 
   texto.textContent = 'Preparando ' + mb(file.size) + ' MB...';
@@ -4464,7 +4554,7 @@ function escuchar() {
   // EventSource reconecta solo, pero si el servidor se cayo del todo conviene
   // no dejar la pagina enseñando datos viejos en silencio.
   es.addEventListener('error', () => {
-    document.getElementById('hint').textContent = 'Sin conexion con el servidor. Reintentando...';
+    document.getElementById('hint').textContent = 'Sin conexión con el servidor. Reintentando...';
   });
   es.addEventListener('open', () => {
     if (state.view !== 'clips') document.getElementById('hint').textContent = '';
@@ -4942,7 +5032,7 @@ function vistaVod() {
    * es la unica que necesita decir de donde cuelga. Un atras a secas no dice a
    * donde vuelves; "Inicio / este video" si.
    */
-  const migas = '<nav class="migas ancho" aria-label="Donde estas">' +
+  const migas = '<nav class="migas ancho" aria-label="Dónde estás">' +
     '<button data-ir="proceso">Inicio</button>' +
     '<span aria-hidden="true">/</span>' +
     '<b>' + esc(d.title) + '</b>' +
@@ -4950,10 +5040,10 @@ function vistaVod() {
 
   if (d.clips.length === 0) {
     return migas +
-      '<div class="empty ancho"><b>Todavia no hay momentos</b>' +
+      '<div class="empty ancho"><b>Todavía no hay momentos</b>' +
       (d.hasTranscript
         ? 'El texto ya esta. Falta buscar los momentos, y eso se lanza desde Inicio.'
-        : 'Este video aun se esta descargando o transcribiendo. Cuando acabe apareceran aqui.') +
+        : 'Este video aún se está descargando o transcribiendo. Cuando acabe aparecerán aquí.') +
       '</div>';
   }
 
@@ -4965,8 +5055,8 @@ function vistaVod() {
       '</div>' +
       (d.duracionCierta
         ? ''
-        : '<p class="reason">La duracion real de este video no se guardo, asi que el eje ' +
-          'llega hasta el final del ultimo momento y no hasta el final del directo.</p>') +
+        : '<p class="reason">La duración real de este video no se guardó, así que el eje ' +
+          'llega hasta el final del último momento y no hasta el final del directo.</p>') +
       lineaTiempo(d.durationSec, d.clips, false) +
       '<div class="stats">' +
         '<div><b>' + d.clips.length + '</b><span>Momentos</span></div>' +
@@ -5158,7 +5248,7 @@ async function decidirLote(status) {
     avisar(plural(r.hechos, 'video') + ' ' +
       (status === 'approved' ? 'aprobado' : status === 'rejected' ? 'descartado' : 'devuelto') +
       (r.hechos === 1 ? '' : 's') +
-      (r.fallidos.length > 0 ? '. ' + plural(r.fallidos.length, 'no se encontro', 'no se encontraron') : '.'));
+      (r.fallidos.length > 0 ? '. ' + plural(r.fallidos.length, 'no se encontró', 'no se encontraron') : '.'));
   } catch (error) {
     avisar(error.message);
   }
@@ -5228,7 +5318,8 @@ const CAPAS = {
     // Los limites son los mismos que valida el servidor. Arrastrar fuera de
     // rango produciria un ajuste que al guardar se rechaza, y el usuario veria
     // un error por haber movido el raton.
-    min: 120,
+    // 400: por debajo lo tapa la interfaz de TikTok (zona segura, Fase 5).
+    min: 400,
     max: 900,
   },
   titulo: {
@@ -5251,12 +5342,12 @@ function textoCapa(cual, a, m) {
   if (cual === 'titulo') {
     // Lo mismo que hace renderClip: la plantilla con el pie dentro.
     const t = String(a.tituloTexto || '{titulo}').replaceAll('{titulo}', pie).trim();
-    return t || 'el titulo del clip';
+    return t || 'el título del clip';
   }
   // Doble barra: este guion vive dentro de un template literal y un \\s suelto
   // llegaria al navegador como una s.
   const palabras = pie.split(/\\s+/).filter(Boolean);
-  return palabras.slice(0, Math.max(1, a.subPalabras)).join(' ') || 'asi se veran';
+  return palabras.slice(0, Math.max(1, a.subPalabras)).join(' ') || 'así se veran';
 }
 
 /** El estilo en linea de una capa, en pixeles ya escalados. */
@@ -5450,9 +5541,9 @@ function pintarCorte(card) {
 
   let problema = '';
   if (!Number.isFinite(c.start) || !Number.isFinite(c.end)) problema = 'Faltan los segundos.';
-  else if (dur <= 0) problema = 'El final tiene que ir despues del principio.';
+  else if (dur <= 0) problema = 'El final tiene que ir después del principio.';
   else if (dur < 5) problema = 'Menos de 5 segundos no da para un clip.';
-  else if (dur > 180) problema = 'Mas de 3 minutos no cabe en un corte.';
+  else if (dur > 180) problema = 'Más de 3 minutos no cabe en un corte.';
 
   // Sin cambios no hay nada que rehacer: el boton apagado dice eso mejor que
   // dejar lanzar un render que produce el mismo fichero.
@@ -5495,7 +5586,7 @@ async function rehacerCorte(card) {
         params: { sourceId, clipId, start: c.start, end: c.end },
       }),
     });
-    avisar('Rehaciendo ' + clipId + '. Tarda menos de un minuto; aparecera con el corte nuevo.');
+    avisar('Rehaciendo ' + clipId + '. Tarda menos de un minuto; aparecerá con el corte nuevo.');
   } catch (error) {
     avisar(error.message);
     boton.disabled = false;
@@ -5875,7 +5966,7 @@ function notaDelPlan(d, actual) {
    */
   if ((d.proveedor ?? 'upload-post') !== 'upload-post') {
     return '<p class="reason" style="margin:var(--s2) 0 0">' +
-      'Estas publicando por la API de TikTok, no por upload-post, asi que estos planes ' +
+      'Estas publicando por la API de TikTok, no por upload-post, así que estos planes ' +
       'no te afectan: el tope es solo tuyo. Cada cuenta autoriza la app por su cuenta.' +
     '</p>';
   }
@@ -5897,7 +5988,7 @@ function notaDelPlan(d, actual) {
   if (Number.isFinite(n) && creadas > n) {
     trozos.push(
       '<p class="warn" style="margin:var(--s2) 0 0">' +
-        'Tienes ' + creadas + ' cuentas creadas y este plan admite ' + n + '. ' +
+        'Tienes ' + plural(creadas, 'cuenta creada', 'cuentas creadas') + ' y este plan admite ' + n + '. ' +
         'Las ' + (creadas - n) + ' que sobran fallaran al publicar hasta que las borres ' +
         'o subas de plan.' +
       '</p>',
@@ -5914,8 +6005,8 @@ function notaDelPlan(d, actual) {
           // precios de upload-post, de publicar por la API propia de TikTok o
           // de haberlo puesto a mano. Las tres son legitimas y ninguna
           // merece un aviso, pero si decir que nadie lo esta respaldando.
-          ? 'Este tope no corresponde a ningun plan de upload-post: lo pusiste a mano.'
-          : 'Cambiar esto aqui NO cambia tu plan en upload-post: hay que contratarlo alli.') +
+          ? 'Este tope no corresponde a ningún plan de upload-post: lo pusiste a mano.'
+          : 'Cambiar esto aquí NO cambia tu plan en upload-post: hay que contratarlo allí.') +
       '</p>',
     );
   }

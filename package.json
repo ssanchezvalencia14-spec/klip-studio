@@ -12,6 +12,8 @@
     "check-health": "tsx scripts/check-health.ts",
     "probar-ia": "tsx scripts/probar-ia.ts",
     "verify:ia": "tsx scripts/verify-ia.ts",
+    "crear-admin": "tsx scripts/crear-admin.ts",
+    "verify:acceso": "tsx scripts/verify-acceso.ts",
     "ingest": "tsx scripts/ingest.ts",
     "select": "tsx scripts/select.ts",
     "typecheck": "tsc --noEmit",
@@ -60,6 +62,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
     "@types/node": "^24.10.1",
+    "bcryptjs": "^3.0.3",
     "postgres": "^3.4.9",
     "typescript": "^5.9.3",
     "zod": "^4.6.1"

@@ -20,7 +20,8 @@ export function renderPage(): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0B0C10">
 <meta name="description" content="Panel de KLIP studio: convierte directos largos en clips verticales.">
 <title>KLIP studio</title>
 <link rel="icon" href="${favicon()}">
@@ -44,7 +45,7 @@ export function renderPage(): string {
   Va en la misma peticion que Instrument Sans: dos familias en una URL es un
   solo viaje, y el preconnect de arriba ya cubre los dos hosts.
 -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 ${CSS}
 </style>

@@ -12,356 +12,136 @@
  */
 
 /*
- * Los tokens del tema oscuro, una sola vez.
+ * Fase 3: un solo tema, oscuro, con los tokens del rediseño.
  *
- * Se emiten en dos sitios: bajo prefers-color-scheme, para quien lleva el
- * sistema en oscuro, y bajo data-tema="oscuro", para quien lo fija a mano.
- * Escribirlos dos veces en el CSS seria garantizar que un dia se separen.
+ * Antes habia dos temas (claro por defecto y oscuro por preferencia del
+ * sistema) y cada pantalla nacia con los dos. El rediseño fija el oscuro como
+ * unico por ahora, asi que los tokens viven directamente en :root y no hay
+ * nada que se pueda desincronizar.
+ *
+ * Se conservan los NOMBRES de las variables (--bg, --panel, --azul...) porque
+ * dos mil lineas de reglas las usan: cambiar el valor aqui recolorea todo el
+ * panel sin tocar una sola regla de maqueta.
+ *
+ * Contraste medido sobre las tarjetas (#12141B): texto principal 15,9:1,
+ * secundario 9,6:1, de apoyo 7,1:1, azul de texto 7,0:1. Todo por encima del
+ * 4,5:1 de AA.
  */
-const TOKENS_OSCUROS = `    --bg: #0F0F11;
-    --bg-velado: rgba(15, 15, 17, .88);
-    --barrido: rgba(255, 255, 255, .06);
-    --velo: rgba(0, 0, 0, .62);
-    --foco: #8E96EE;
-    --indigo-pastilla: rgba(71, 82, 216, .22);
-    --no-pastilla: rgba(240, 138, 126, .16);
-    --panel: #17171A;
-    --hueco: #1D1D21;
-    --raised: #232328;
-    --line: #2A2A30;
-    --linea-viva: #3A3A42;
-    --punto: #3A3A42;
-
-    --text: #F2F2F3;
-    --dim: #A6A6AE;
-    --faint: #85858F;
-    --mono: #A6A6AE;
-
-    /* El azul aclarado, y sus derivados con mas cuerpo: sobre un fondo
-       oscuro un 6% de opacidad no se ve. */
-    --azul: #5B76EE;
-    --azul-texto: #8CA0F4;
-    --azul-hueco: rgba(91, 118, 238, .12);
-    --azul-pastilla: rgba(91, 118, 238, .20);
-    --azul-borde: rgba(91, 118, 238, .42);
-    --indigo: #4752D8;
-    --indigo-texto: #8E96EE;
-
-    --aviso-fondo: #2A2113;
-    --aviso-texto: #E8B765;
-    --aviso-borde: #4A3A1C;
-
-    --ok-fondo: #11251D;
-    --ok-texto: #5FC79D;
-    --ok-borde: #1F4435;
-
-    --error-fondo: #2B1613;
-    --error-texto: #F08A7E;
-    --error-borde: #4D2721;
-    --no: #F08A7E;
-
-    /*
-     * Las sombras casi desaparecen y el borde toma el relevo.
-     *
-     * Sobre un fondo oscuro una sombra negra no se ve: lo que separa una
-     * superficie de otra es que sea mas clara. Mantener aqui la sombra del
-     * tema claro solo ensucia los bordes.
-     */
-    --sombra-accion: 0 0 0 1px rgba(91, 118, 238, .22), 0 8px 24px -10px rgba(0, 0, 0, .7);
-    --sombra-hover: 0 0 0 1px var(--linea-viva), 0 12px 28px -12px rgba(0, 0, 0, .8);
-    --elev-elevada: var(--sombra-hover);
-    --elev-flotante: 0 24px 60px -20px rgba(0, 0, 0, .75), 0 0 0 1px var(--line);
-  `
-
 export const CSS = `  :root {
-    /*
-     * KLIP studio. Negro, azul, indigo y blanco.
-     *
-     * Antes cada seccion usaba el color que hizo falta en su momento: teal para
-     * el boton principal, ambar para las cifras, verde para lo aprobado. Cinco
-     * colores sin sistema. Ahora cada uno significa una cosa y solo una:
-     *
-     *   azul    lo que requiere tu accion
-     *   indigo  lo que ya salio bien
-     *   blanco  informacion que no pide nada
-     *   ambar   alerta de verdad, y nada mas
-     */
-    --negro: #0D0D0D;
-    --azul: #4160E6;
-    --indigo: #1C23A6;
-    --blanco: #FAFAFA;
+    color-scheme: dark;
 
-    /*
-     * Los colores de marca se usan TAL CUAL, sin variantes aclaradas.
-     *
-     * Este es el cambio de fondo a claro resumido en dos lineas. Sobre el negro
-     * el indigo daba 1,70:1 y el azul 3,74:1, asi que ninguno de los dos podia
-     * ser texto y habia que inventar versiones aclaradas (#5D77E9, #7579C8) que
-     * ya no eran del manual. Sobre #FAFAFA los tonos reales MIDEN 5,03:1 el azul
-     * y 11,08:1 el indigo: los dos pasan AA como texto normal.
-     *
-     * Se quedan los nombres --azul-texto y --indigo-texto, apuntando al color de
-     * marca, porque hay una docena de sitios que los llaman. No son un tono
-     * distinto, son el mismo.
-     */
-    --azul-texto: var(--azul);
-    --indigo-texto: var(--indigo);
-    /*
-     * Dos intensidades del hueco azul, no una.
-     *
-     * Sobre negro un 8% era un gris apenas teñido y servia para todo. Sobre
-     * blanco el mismo 8% ya se lee como color, asi que el item activo del menu
-     * baja al 6% (ahi solo tiene que ubicarte, no llamarte) y las etiquetas de
-     * estado suben al 12%, que necesitan sostener texto azul encima.
-     */
-    --azul-hueco: rgba(65, 96, 230, .06);
-    --azul-pastilla: rgba(65, 96, 230, .12);
-    --azul-borde: rgba(65, 96, 230, .34);
+    /* Fondos: app, menu, tarjeta, elevado. */
+    --bg: #0B0C10;
+    --menu-fondo: #0E1016;
+    --panel: #12141B;
+    --raised: #181B24;
+    /* Lo hundido (campos de texto, pistas) va un punto por debajo de la tarjeta. */
+    --hueco: #0E1016;
+    --bg-velado: rgba(11, 12, 16, .86);
 
-    --bg: var(--blanco);
-    --panel: #FFFFFF;
-    /* El mismo fondo, traslucido, para la cabecera pegajosa. */
-    --bg-velado: rgba(250, 250, 250, .88);
-    /* El barrido del esqueleto y el velo del cajon lateral. Los dos dependen
-       del tema: en claro hay que oscurecer, en oscuro hay que aclarar. */
-    --barrido: rgba(13, 13, 13, .055);
-    --velo: rgba(13, 13, 13, .38);
-    /* El anillo de foco NO es el azul de accion: sobre un boton azul el
-       anillo azul desaparece. El indigo contrasta con los dos. */
-    --foco: var(--indigo);
-    /*
-     * Lo que va ENCIMA de un fotograma de video no sigue el tema.
-     *
-     * Debajo puede haber un plano blanco o uno negro, y eso no lo decide el
-     * tema de la pagina sino el video. Por eso este velo es el mismo en claro
-     * y en oscuro: su trabajo es separar el control del fotograma, no
-     * combinar con la pagina.
-     */
-    --sobre-video: rgba(13, 13, 13, .45);
-    --indigo-pastilla: rgba(28, 35, 166, .10);
-    --no-pastilla: rgba(189, 62, 49, .12);
-    /*
-     * --hueco ya no es "mas oscuro que el fondo", es "hundido".
-     *
-     * En claro un campo de texto no se hunde poniendolo mas negro: se hunde
-     * poniendolo un gris por debajo del blanco de la tarjeta. Mismo papel,
-     * direccion contraria.
-     */
-    --hueco: #F4F4F5;
-    --raised: #F1F1F3;
-    --line: #E4E4E7;
-    --linea-viva: #D4D4D8;
-    --punto: #D4D4D8;
-    --text: var(--negro);
-    /*
-     * Dos grises, y los dos legibles.
-     *
-     * La marca solo nombra #71717A, pero con un unico gris no hay jerarquia
-     * entre "texto secundario" y "etiqueta". El problema es que en claro el
-     * margen es estrecho: #A1A1AA, que seria el tercer escalon natural, MIDE
-     * 2,52:1 sobre #FAFAFA y no pasa AA ni de lejos, y lo llevaban etiquetas de
-     * 11 px, que es el peor sitio posible.
-     *
-     * Asi que la escala baja en vez de subir: #52525B (7,47:1) para lo
-     * secundario y el #71717A de marca (4,68:1) para lo terciario. Los dos por
-     * encima del 4,5:1. La diferencia entre niveles la acaban de marcar el
-     * tamaño y el peso, que es de donde deberia venir.
-     */
-    --dim: #52525B;
-    --faint: #71717A;
-    --mono: #52525B;
+    /* Bordes. */
+    --line: #252A36;
+    --linea-viva: #3A4258;
+    --punto: #3A4258;
 
-    /*
-     * El ambar es la unica excepcion a la marca, y esta aparte por eso.
-     *
-     * Sirve para una sola cosa: avisar de que faltan videos. Si se usa tambien
-     * para decorar cifras, deja de significar "atiende esto" y el aviso de
-     * verdad se pierde entre los demas.
-     *
-     * Invertido para fondo claro: relleno casi blanco, texto tostado. MEDIDO,
-     * el texto sobre su propio fondo da 5,51:1.
-     */
-    --aviso-fondo: #FEF6E7;
-    --aviso-texto: #8A5A0B;
-    --aviso-borde: #F5D9A0;
-    /*
-     * El rojo no cambia al pasar a claro, y eso no es pereza: se eligio por
-     * contraste con blanco encima (5,16:1) y da CASI LO MISMO usado al reves,
-     * como texto sobre #FAFAFA (5,22:1). Sirve para las dos cosas.
-     */
-    --no: #BD3E31;
+    /* Texto: principal, secundario, de apoyo. */
+    --text: #ECEEF4;
+    --txt: var(--text);
+    --dim: #B3BACB;
+    --faint: #9BA3B5;
+    --mono: #B3BACB;
 
-    /*
-     * La familia de estados, completa.
-     *
-     * Habia aviso (ambar) y error (--no) sueltos, pero ni exito ni informativo:
-     * lo que salia bien se pintaba con el indigo de marca, que ya significa
-     * "enfasis secundario". Dos significados en un color es un color que no
-     * dice nada.
-     *
-     * Cada estado trae fondo, texto y borde, porque un estado se lee en los
-     * tres sitios a la vez. Los tonos de texto estan elegidos para pasar AA
-     * sobre su propio fondo y tambien sobre el lienzo claro.
-     */
-    --ok-fondo: #E9F5EF;
-    --ok-texto: #156B4C;
-    --ok-borde: #BCE0D0;
+    /* Acento. Relleno, texto sobre oscuro, fondo suave y tarjeta destacada. */
+    --azul: #5B7CFF;
+    --azul-texto: #8FA5FF;
+    --indigo: #8FA5FF;
+    --indigo-texto: #B9C6FF;
+    --azul-hueco: #1B2140;
+    --azul-pastilla: rgba(91, 124, 255, .20);
+    --azul-borde: rgba(91, 124, 255, .45);
+    --destacada: #151A2E;
+    --destacada-borde: #2D3550;
+    --indigo-pastilla: rgba(143, 165, 255, .16);
 
-    --error-fondo: #FBECEA;
-    --error-texto: #9C2E25;
-    --error-borde: #F0C5C0;
-
+    /* Estados, cada uno con su fondo tenue. */
+    --ok-texto: #3DDC97;
+    --ok-fondo: #12261E;
+    --ok-borde: #1E4A37;
+    --aviso-texto: #FFB454;
+    --aviso-fondo: #171510;
+    --aviso-borde: #3D3220;
+    --error-texto: #FF7A7A;
+    --error-fondo: #1A1111;
+    --error-borde: #4A2424;
+    --no: #FF7A7A;
+    --no-pastilla: rgba(255, 122, 122, .14);
     --info-fondo: var(--azul-hueco);
-    --info-texto: var(--azul);
+    --info-texto: var(--azul-texto);
     --info-borde: var(--azul-borde);
 
-    /*
-     * Tipografia de datos.
-     *
-     * Las horas, las duraciones y los timecodes iban en la proporcional del
-     * resto del texto, asi que una columna de horas no alineaba: en una
-     * herramienta de video eso es un fallo de oficio. JetBrains Mono tiene las
-     * cifras del mismo ancho por construccion y distingue el cero de la O, que
-     * importa cuando se lee un identificador de publicacion.
-     *
-     * Solo para DATOS. Usarla en texto corrido la convertiria en decoracion de
-     * terminal, que es otro tell de panel generico.
-     */
-    --fuente-dato: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+    /* Lo que va encima de un fotograma de video no sigue el tema. */
+    --sobre-video: rgba(11, 12, 16, .55);
+    --barrido: rgba(255, 255, 255, .06);
+    --velo: rgba(0, 0, 0, .62);
+    /* El anillo de foco no es el azul de relleno: sobre un boton azul no se veria. */
+    --foco: #B9C6FF;
 
-    /*
-     * Sombras.
-     *
-     * Dos, y ninguna decorativa. La primera es la de la tarjeta que pide accion;
-     * la segunda solo existe mientras el puntero esta encima de un clip. Una
-     * sombra igual en todas las superficies es el tell del kit de SaaS generico:
-     * si todo flota, nada destaca, y la jerarquia hay que leerla.
-     */
-    --sombra-accion: 0 1px 2px rgba(13, 13, 13, .04), 0 8px 20px -6px rgba(28, 35, 166, .10);
-    --sombra-hover: 0 2px 4px rgba(13, 13, 13, .05), 0 12px 24px -8px rgba(13, 13, 13, .10);
-    --elev-elevada: var(--sombra-hover);
-    --elev-flotante: 0 24px 60px -20px rgba(13, 13, 13, .28), 0 2px 8px rgba(13, 13, 13, .06);
-
-    /* Nombres antiguos, apuntando ya al sistema nuevo. */
-    --ok: var(--indigo);
+    /* Nombres antiguos, apuntando al sistema nuevo. */
+    --negro: #0B0C10;
+    --blanco: #ECEEF4;
+    --ok: var(--ok-texto);
     --accent: var(--azul);
     --live: var(--azul);
     --live-hueco: var(--azul-hueco);
-    --live-hondo: var(--indigo);
+    --live-hondo: var(--azul-texto);
 
     /*
-     * Cuatro radios, ni uno mas, y en escalera.
-     *
-     * Habia siete valores distintos (3, 8, 9, 10, 14, 50%, 999px) sin regla
-     * detras. Una interfaz con siete redondeos se lee como descuidada aunque
-     * nadie sepa senalar por que.
-     *
-     * Van de menor a mayor segun el tamaño de lo que envuelven, que es la
-     * regla optica: un boton dentro de una tarjeta con el MISMO radio que la
-     * tarjeta parece pegado al borde. Cuanto mas grande la superficie, mas
-     * redondeo aguanta sin parecer una pastilla.
+     * Tipografia: Sora para titulos y cifras grandes, DM Sans para el texto,
+     * JetBrains Mono para tiempos, identificadores y atajos.
      */
-    --r-control: 9px;
-    --r-tarjeta: 14px;
-    --r-panel: 18px;
-    --r-pildora: 999px;
+    --fuente-titulo: "Sora", "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --fuente-texto: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --fuente-dato: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
-    /*
-     * Tres alturas, y cada una significa una cosa.
-     *
-     * Antes todo lo elevado usaba la misma sombra, asi que una tarjeta de la
-     * lista y un dialogo encima de todo pesaban igual. Ahora:
-     *
-     *   plana      apoyada en la pagina, solo borde. La mayoria de tarjetas
-     *   elevada    se levanta al pasar por encima o cuando pide accion
-     *   flotante   esta ENCIMA de la pagina: dialogos y paneles emergentes
-     */
+    /* Sombras: casi nada; sobre oscuro separa el borde, no la sombra. */
+    --sombra-accion: 0 0 0 1px var(--destacada-borde), 0 10px 30px -14px rgba(0, 0, 0, .8);
+    --sombra-hover: 0 0 0 1px var(--linea-viva), 0 12px 28px -12px rgba(0, 0, 0, .8);
     --elev-plana: none;
+    --elev-elevada: var(--sombra-hover);
+    --elev-flotante: 0 24px 60px -20px rgba(0, 0, 0, .75), 0 0 0 1px var(--line);
 
-    /*
-     * Escala tipografica.
-     *
-     * Antes casi todo estaba entre 13 y 15 px, asi que nada destacaba y habia
-     * que leerlo entero para saber que era importante. Cuatro tamaños con saltos
-     * claros bastan: una cifra grande se ve de un vistazo, el cuerpo se lee y lo
-     * secundario se puede ignorar sin esfuerzo.
-     */
-    --t-hero: 30px;
-    --t-cifra: 22px;
-    --t-titulo: 16px;
-    --t-cuerpo: 14px;
-    --t-meta: 12.5px;
-    --t-micro: 11px;
+    /* Radios: controles 12, tarjetas 18, paneles 20. */
+    --r-control: 12px;
+    --r-tarjeta: 18px;
+    --r-panel: 20px;
+    --r-pildora: 999px;
+    /* Todo lo que se pulsa mide al menos esto de alto. */
+    --alto-control: 44px;
 
-    /* Ritmo vertical sobre una rejilla de 4 px. */
+    /* Escala tipografica. */
+    --t-hero: 32px;
+    --t-cifra: 26px;
+    --t-titulo: 17px;
+    --t-cuerpo: 15px;
+    --t-meta: 13px;
+    --t-micro: 12px;
+
     --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
 
     /*
-     * Movimiento.
-     *
-     * No habia ninguno: cero animaciones en toda la pagina y siete transiciones
-     * sueltas con duraciones inventadas (.12s, .15s, .16s, .2s, .22s). Eso no es
-     * sobriedad, es ausencia de sistema: la interfaz aparecia de golpe y nada
-     * indicaba que algo estuviera pasando.
-     *
-     * Tres duraciones y dos curvas, y nada mas.
-     *
-     * La curva de salida es la que importa: arranca rapido y frena al final,
-     * que es como se mueven las cosas con masa. La de muelle se pasa un poco
-     * del destino y vuelve; se reserva para lo que aparece, nunca para lo que
-     * se va, porque algo que rebota al desaparecer se lee como un error.
+     * Movimiento. Entradas de 0,5 s subiendo 10 px, escalonadas 50 ms; cambio
+     * de pantalla en 180 ms. Todo se apaga con prefers-reduced-motion.
      */
-    --m-rapido: 140ms;
+    --m-rapido: 150ms;
     --m-medio: 240ms;
+    --m-entrada: 500ms;
     --m-lento: 420ms;
-    --e-salida: cubic-bezier(.32, .72, 0, 1);
+    --m-pantalla: 180ms;
+    --e-salida: cubic-bezier(.22, .8, .2, 1);
     --e-muelle: cubic-bezier(.34, 1.4, .64, 1);
-
-    /*
-     * Retardo entre hermanos en una lista.
-     *
-     * Treinta clips entrando a la vez son un parpadeo; entrando en cascada se
-     * leen como una lista que se llena. Con 40 ms el ultimo visible entra antes
-     * de medio segundo, asi que no se convierte en una espera.
-     */
-    --m-paso: 40ms;
+    --m-paso: 50ms;
   }
 
-  /*
-   * MODO OSCURO.
-   *
-   * No habia ninguno: cero reglas en todo el fichero. El panel se abre a
-   * menudo de noche y desde el movil, y un blanco de pared a oscuras es la
-   * clase de detalle que hace que una herramienta parezca improvisada.
-   *
-   * Solo se redefinen TOKENS, ni una regla de maqueta. Todo lo demas ya los
-   * usa, asi que el tema entero cabe en este bloque y no puede
-   * desincronizarse: una pantalla nueva nace con los dos temas por defecto.
-   *
-   * El fondo es #0F0F11, no negro puro. El negro absoluto con texto blanco
-   * produce halo alrededor de las letras y cansa en lecturas largas, que es
-   * justo lo que es revisar cuarenta clips.
-   *
-   * El acento se ACLARA a #5B76EE. El azul de marca sobre fondo oscuro se
-   * queda en 3,6:1 y no llega a AA para texto pequeño; aclarado da 5,9:1 y
-   * sigue siendo reconociblemente el mismo azul.
-   *
-   * La condicion es doble a proposito: respeta la preferencia del sistema,
-   * pero si alguien fija el tema a mano con data-tema="claro", gana esa.
-   */
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-tema="claro"]) { color-scheme: dark; }
-  }
-  :root[data-tema="oscuro"] { color-scheme: dark; }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-tema="claro"]) {
-${TOKENS_OSCUROS}
-    }
-  }
-  :root[data-tema="oscuro"] {
-${TOKENS_OSCUROS}
-  }
 
   /*
    * Las animaciones, en un solo sitio.
@@ -402,6 +182,54 @@ ${TOKENS_OSCUROS}
   @keyframes resuelta {
     to { opacity: 0; transform: translateX(var(--sale, 0)) scale(.96); }
   }
+  /* El punto verde que "respira": algo esta vivo ahora mismo. */
+  @keyframes respira {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(61, 220, 151, .45); }
+    50%      { box-shadow: 0 0 0 6px rgba(61, 220, 151, 0); }
+  }
+  /* Brillo que recorre una barra mientras hay trabajo en curso. */
+  @keyframes brillo {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(200%); }
+  }
+  /* La insignia de aprobado o descartado: aparece con un golpe corto. */
+  @keyframes pop {
+    0%   { opacity: 0; transform: scale(.6); }
+    60%  { opacity: 1; transform: scale(1.12); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes fundido {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* Titulos y cifras grandes en Sora; datos en mono. */
+  h1, h2, h3, .cifra, .stats b, .hook, .jobname, .srctitle, .seccion h2, .flujo b, .siguiente h2 {
+    font-family: var(--fuente-titulo);
+    letter-spacing: -.01em;
+  }
+  .dato, time, kbd, .mono { font-family: var(--fuente-dato); font-variant-numeric: tabular-nums; }
+  kbd {
+    display: inline-block; min-width: 1.6em; padding: 1px 6px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--raised); color: var(--dim);
+    font-size: 11.5px; line-height: 1.5; text-align: center;
+  }
+
+  /* Botones y campos: al menos 44 px de alto, tambien en el movil. */
+  button.act, .chip, input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+  select, .subtab {
+    min-height: var(--alto-control);
+  }
+
+  /* Iconos de trazo (lucide), del color del texto. */
+  .ico-svg { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Punto de estado vivo. */
+  .vivo-punto { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ok-texto); flex: none; animation: respira 2s ease-in-out infinite; }
+  .vivo-punto.apagado { background: var(--no); animation: none; }
+  .vivo-punto.espera { background: var(--aviso-texto); animation: none; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
     margin: 0;
@@ -418,7 +246,7 @@ ${TOKENS_OSCUROS}
      * Detras va el sistema, no un sans generico: si la fuente no llega, el panel
      * se pinta con la del aparato y se sigue leyendo igual.
      */
-    font: 15px/1.5 "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 15px/1.55 var(--fuente-texto);
     padding-bottom: env(safe-area-inset-bottom);
     -webkit-font-smoothing: antialiased;
     /*

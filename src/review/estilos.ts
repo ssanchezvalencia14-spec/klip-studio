@@ -2035,4 +2035,122 @@ export const CSS = `  :root {
     background: none; border: none; padding: 0; cursor: pointer;
     color: var(--azul-texto); font: inherit; text-decoration: underline;
   }
+
+  /* =====================================================================
+   * Fase 3: estructura. Menu de seis secciones, cabecera y barra movil.
+   *
+   * Va al final a proposito: manda sobre las reglas antiguas del menu
+   * desplegable sin tener que reescribirlas una por una.
+   * ===================================================================== */
+
+  /* Cabecera: titulo, Añadir video, buscar, avisos, salir, mas opciones. */
+  header { background: var(--bg-velado); border-bottom-color: var(--line); }
+  .cabecera { gap: var(--s2); min-height: var(--alto-control); }
+  #title { font-size: 20px; font-weight: 650; margin-right: auto; }
+  .icono-boton {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-width: var(--alto-control); min-height: var(--alto-control); padding: 0 10px;
+    border-radius: var(--r-control); border: 1px solid transparent;
+    background: none; color: var(--dim); cursor: pointer; text-decoration: none;
+    font: inherit; font-size: var(--t-meta);
+  }
+  @media (hover: hover) { .icono-boton:hover { color: var(--text); background: var(--raised); } }
+  #abrir-buscar { margin-left: 0; font-size: inherit; }
+  #abrir-buscar kbd { margin-left: 2px; }
+  #campana, #salir { font-size: inherit; padding: 0 10px; }
+  #campana[aria-expanded="true"] { color: var(--text); background: var(--raised); }
+  .anadir {
+    display: inline-flex; align-items: center; gap: 8px;
+    border-radius: var(--r-control); padding: 0 16px; font-weight: 600;
+  }
+  .anadir .ico-svg { width: 17px; height: 17px; }
+  #menu { font-size: inherit; margin-left: 0; color: var(--dim); }
+
+  /* El menu. Columna izquierda de 248 px en pantalla ancha. */
+  #nav {
+    width: 248px; max-width: none; background: var(--menu-fondo);
+    border-right: 1px solid var(--line); gap: 2px;
+    padding: calc(var(--s5) + env(safe-area-inset-top)) var(--s3) var(--s4);
+  }
+  .marca { padding: 0 var(--s2) var(--s5); gap: 10px; }
+  .marca-k { display: block; flex: none; }
+  .marca-klip { font-family: var(--fuente-titulo); font-size: 18px; letter-spacing: -.01em; }
+  .marca-studio { font-style: normal; font-size: 14px; color: var(--faint); font-weight: 500; }
+  #nav button {
+    min-height: var(--alto-control); border-radius: var(--r-control);
+    border-left: 0; padding: 0 var(--s3); gap: var(--s3);
+    color: var(--dim); font-weight: 500;
+  }
+  @media (hover: hover) {
+    #nav button:not([aria-current="true"]):hover { color: var(--text); background: var(--raised); }
+  }
+  #nav button[aria-current="true"] {
+    color: var(--indigo-texto); background: var(--azul-hueco); font-weight: 600;
+  }
+  #nav button[aria-current="true"] .ico-svg { color: var(--azul-texto); }
+  #nav button b { background: var(--azul); color: #fff; font-family: var(--fuente-dato); }
+
+  /* Estado del procesador, abajo del menu. */
+  .nav-estado {
+    margin-top: auto; padding: var(--s3); border-radius: var(--r-control);
+    background: var(--panel); border: 1px solid var(--line);
+    font-size: var(--t-meta); color: var(--dim);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .nav-estado:empty { display: none; }
+  .nav-estado .fila-estado { display: flex; align-items: center; gap: 8px; }
+
+  /* Mas opciones: una hoja pequeña bajo la cabecera. */
+  .hoja {
+    position: fixed; z-index: 40; top: calc(64px + env(safe-area-inset-top)); right: var(--s4);
+    min-width: 220px; padding: 6px; border-radius: var(--r-tarjeta);
+    background: var(--raised); border: 1px solid var(--line); box-shadow: var(--elev-flotante);
+    display: flex; flex-direction: column; gap: 2px;
+    animation: entra var(--m-medio) var(--e-salida) both;
+  }
+  .hoja[hidden] { display: none; }
+  .hoja button, .hoja a {
+    display: flex; align-items: center; gap: var(--s3); min-height: var(--alto-control);
+    padding: 0 var(--s3); border-radius: var(--r-control); border: 0; background: none;
+    color: var(--text); text-decoration: none; font: inherit; cursor: pointer; text-align: left;
+  }
+  @media (hover: hover) { .hoja button:hover, .hoja a:hover { background: var(--panel); } }
+
+  /* Cambio de pantalla: un fundido corto. */
+  main.cambia { animation: fundido var(--m-pantalla) ease-out both; }
+
+  /* Pestañas de seccion con el acento nuevo. */
+  .subtab { color: var(--dim); }
+  .subtab[aria-selected="true"] { color: var(--indigo-texto); border-bottom-color: var(--azul); }
+
+  /* --- Pantalla ancha ------------------------------------------------- */
+  @media (min-width: 900px) {
+    #nav { transform: none; }
+    body { padding-left: 248px; }
+    #menu, #fondo, .hoja { display: none !important; }
+    .solo-estrecho { display: none !important; }
+  }
+
+  /* --- Movil: barra inferior de cinco iconos ---------------------------- */
+  @media (max-width: 899px) {
+    .solo-ancho { display: none !important; }
+    .anadir span { display: none; }
+    .anadir { padding: 0; width: var(--alto-control); justify-content: center; }
+    #nav {
+      top: auto; bottom: 0; left: 0; right: 0; width: auto; height: auto;
+      transform: none; flex-direction: row; gap: 0;
+      padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+      border-right: 0; border-top: 1px solid var(--line);
+      background: var(--bg-velado); backdrop-filter: blur(10px);
+    }
+    #nav .marca, #nav .titulo, .nav-estado { display: none; }
+    #nav button {
+      flex: 1 1 0; flex-direction: column; justify-content: center; gap: 3px;
+      min-height: 56px; padding: 4px 2px; font-size: 11.5px; position: relative;
+    }
+    #nav button b {
+      position: absolute; top: 4px; left: calc(50% + 6px); margin: 0; padding: 0 6px;
+    }
+    body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  }
 `

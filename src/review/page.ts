@@ -12,7 +12,8 @@
  */
 import { CSS } from './estilos.js'
 import { GUION } from './guion.js'
-import { favicon, isotipo } from './marca.js'
+import { faviconK, marcaK } from './marca.js'
+import { icono } from './iconos.js'
 
 export function renderPage(): string {
   return `<!doctype html>
@@ -24,7 +25,7 @@ export function renderPage(): string {
 <meta name="theme-color" content="#0B0C10">
 <meta name="description" content="Panel de KLIP studio: convierte directos largos en clips verticales.">
 <title>KLIP studio</title>
-<link rel="icon" href="${favicon()}">
+<link rel="icon" href="${faviconK()}">
 <!--
   Instrument Sans, no la fuente del sistema.
   VERIFICADO contra fonts.googleapis.com (v4): existe con itálica 400 (la del
@@ -59,11 +60,12 @@ ${CSS}
 <a class="salto" href="#view">Saltar al contenido</a>
 <header>
   <div class="cabecera">
-    <button id="menu" aria-label="Abrir el menu">&#9776;</button>
     <h1 id="title">Inicio</h1>
-    <button id="abrir-buscar" aria-label="Buscar" title="Buscar (Ctrl+K)">&#9906;</button>
-    <button id="campana" aria-label="Avisos" aria-expanded="false" aria-controls="avisos">&#9737;</button>
-    <a id="salir" href="/logout" aria-label="Cerrar sesión" title="Cerrar sesión">&#10162;</a>
+    <button id="anadir" class="act go anadir" data-ir="videos">${icono('mas')}<span>Añadir video</span></button>
+    <button id="abrir-buscar" class="icono-boton" aria-label="Buscar (Ctrl+K)" title="Buscar (Ctrl+K)">${icono('buscar')}<kbd class="solo-ancho">Ctrl K</kbd></button>
+    <button id="campana" class="icono-boton" aria-label="Avisos" aria-expanded="false" aria-controls="avisos">${icono('avisos')}</button>
+    <a id="salir" class="icono-boton solo-ancho" href="/logout" aria-label="Cerrar sesión" title="Cerrar sesión">${icono('salir')}</a>
+    <button id="menu" class="icono-boton" aria-label="Más opciones" aria-expanded="false" aria-controls="mas">${icono('menu')}</button>
   </div>
   <div class="tabs" id="tabs"></div>
 </header>
@@ -72,19 +74,30 @@ ${CSS}
 <p class="hint" id="hint"></p>
 
 <div id="fondo"></div>
-<nav id="nav">
+<!--
+  El menu. En pantalla ancha es la columna de la izquierda; en el movil se
+  convierte en la barra de abajo con cinco iconos, y Ajustes pasa al menu de
+  "Mas opciones" de la cabecera.
+-->
+<nav id="nav" aria-label="Secciones">
   <div class="marca">
-    ${isotipo(26)}
-    <span class="marca-texto">
-      <span class="marca-klip">KLIP</span><span class="marca-studio">studio</span>
-    </span>
+    ${marcaK(30)}
+    <span class="marca-texto"><span class="marca-klip">KLIP</span><span class="marca-studio">studio</span></span>
   </div>
-  <p class="titulo">Panel</p>
-  <button data-seccion="inicio" aria-current="true"><i>&#9654;</i>Inicio</button>
-  <button data-seccion="revisar"><i>&#9635;</i>Revisar<b id="pend" hidden></b></button>
-  <button data-seccion="agenda"><i>&#9776;</i>Agenda</button>
-  <button data-seccion="config"><i>&#9881;</i>Ajustes</button>
+  <button data-seccion="inicio" aria-current="true">${icono('inicio')}<span>Inicio</span></button>
+  <button data-seccion="videos">${icono('videos')}<span>Videos</span></button>
+  <button data-seccion="revisar">${icono('revisar')}<span>Revisar</span><b id="pend" hidden></b></button>
+  <button data-seccion="agenda">${icono('agenda')}<span>Agenda</span></button>
+  <button data-seccion="cuentas">${icono('cuentas')}<span>Cuentas</span></button>
+  <button data-seccion="config" class="solo-ancho">${icono('ajustes')}<span>Ajustes</span></button>
+  <div id="nav-estado" class="nav-estado" aria-live="polite"></div>
 </nav>
+
+<!-- Mas opciones: en el movil es donde viven Ajustes y cerrar sesion. -->
+<div id="mas" class="hoja" role="menu" hidden>
+  <button role="menuitem" data-seccion="config">${icono('ajustes')}<span>Ajustes</span></button>
+  <a role="menuitem" href="/logout">${icono('salir')}<span>Cerrar sesión</span></a>
+</div>
 
 <!--
   Buscador. Se abre con Ctrl+K (o Cmd+K) y con el boton de la cabecera.

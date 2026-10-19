@@ -73,6 +73,11 @@ async function main(): Promise<void> {
        * moriria nada mas arrancar.
        */
       campana: { type: 'string' },
+      /*
+       * Video musical. Tampoco se usa aqui: lo lee el encadenado al terminar
+       * para buscar estribillos (momentos) en vez de preguntar a la IA.
+       */
+      musica: { type: 'boolean', default: false },
     },
   })
 

@@ -123,8 +123,10 @@ export function buildJob(
        * desplegable cuando se deja en "Sin asignar".
        */
       const campana = params.campanaId
+      // Video musical: al terminar se buscan estribillos, sin IA (ver cadena.ts).
+      const musica = params.tipo === 'musica' ? ['--musica'] : []
       if (campana === undefined || campana === '') {
-        return { kind: 'ingest', args: [url], label: `Descargar y transcribir` }
+        return { kind: 'ingest', args: [url, ...musica], label: `Descargar y transcribir` }
       }
       if (
         typeof campana !== 'string' ||
@@ -134,7 +136,7 @@ export function buildJob(
       }
       return {
         kind: 'ingest',
-        args: [url, '--campana', campana],
+        args: [url, '--campana', campana, ...musica],
         label: `Descargar y transcribir`,
       }
     }

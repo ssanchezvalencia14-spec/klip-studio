@@ -97,3 +97,32 @@ export function favicon(): string {
     '</g></svg>'
   return 'data:image/svg+xml,' + encodeURIComponent(svg)
 }
+
+/*
+ * La marca del rediseño (Fase 3): una K en un cuadrado azul.
+ *
+ * El isotipo de arriba es la P del manual con su espiral, y en el panel se leia
+ * como una "P", no como "KLIP". Hasta que el manual tenga una version con la
+ * K, el panel usa esta: la inicial del nombre, sin ambiguedad, y el texto
+ * "KLIP studio" al lado. Los vectores del manual se quedan aqui por si vuelven.
+ */
+const K_TRAZOS = 'M11.5 8.5v15M11.5 17.2 20.5 8.5M15.2 13.9l6.3 9.6'
+
+export function marcaK(alto = 32): string {
+  return (
+    '<svg class="marca-k" viewBox="0 0 32 32" width="' + alto + '" height="' + alto + '" ' +
+    'aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">' +
+    '<rect width="32" height="32" rx="9" fill="#5B7CFF"/>' +
+    '<path d="' + K_TRAZOS + '" fill="none" stroke="#fff" stroke-width="3.2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  )
+}
+
+export function faviconK(): string {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+    '<rect width="32" height="32" rx="9" fill="#5B7CFF"/>' +
+    '<path d="' + K_TRAZOS + '" fill="none" stroke="#fff" stroke-width="3.2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  return 'data:image/svg+xml,' + encodeURIComponent(svg)
+}

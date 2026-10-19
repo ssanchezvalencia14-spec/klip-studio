@@ -1444,7 +1444,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       // El trabajo se encola con la ruta que eligio el servidor, no con una que
       // haya mandado el cliente: la subida y el arranque son un solo paso para
       // que ningun path viaje por la red.
-      const args = esUuid ? [stored.path, '--campana', campana] : [stored.path]
+      // El tipo de video viaja en otra cabecera: x-tipo: musica.
+      const musica = req.headers['x-tipo'] === 'musica' ? ['--musica'] : []
+      const args = [...(esUuid ? [stored.path, '--campana', campana] : [stored.path]), ...musica]
       const job = await cola.encolar('ingest', args, `Transcribir ${stored.name}`)
       avisarCambio('trabajos')
       sendJson(res, 202, { job, upload: stored })

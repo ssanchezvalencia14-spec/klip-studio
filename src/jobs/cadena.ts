@@ -59,7 +59,7 @@ function leerDelResumen(job: Job, campo: string): string | undefined {
   return patron.exec(job.log)?.[1]
 }
 
-type PasoEncadenable = 'select' | 'render' | 'subir' | 'schedule'
+type PasoEncadenable = 'select' | 'momentos' | 'render' | 'subir' | 'schedule'
 
 /** Decide que toca despues, o nada si la cadena termina aqui. */
 function siguientePaso(job: Job): { kind: PasoEncadenable; sourceId: string } | null {
@@ -69,7 +69,8 @@ function siguientePaso(job: Job): { kind: PasoEncadenable; sourceId: string } | 
       log.warn('El ingest acabo bien pero no se pudo leer el sourceId. La cadena se detiene.')
       return null
     }
-    return { kind: 'select', sourceId }
+    // Un video musical no pasa por la IA: se buscan los estribillos en el audio.
+    return { kind: job.args.includes('--musica') ? 'momentos' : 'select', sourceId }
   }
 
   // El atajo de musica desemboca en el mismo sitio que `select`: hay cortes
@@ -124,6 +125,7 @@ function siguientePaso(job: Job): { kind: PasoEncadenable; sourceId: string } | 
 
 const ETIQUETAS = {
   select: (id: string) => `Buscar momentos de ${id}`,
+  momentos: (id: string) => `Buscar estribillos de ${id}`,
   render: (id: string) => `Crear los videos de ${id}`,
   subir: (id: string) => `Subir para revisar ${id}`,
   schedule: (id: string) => `Repartir ${id} entre las cuentas`,
@@ -172,7 +174,8 @@ export function arrancarCadena(cola: Cola, alEncolar?: () => void): () => void {
       log.info(`${job.kind} termino, sigue ${siguiente.kind} de ${siguiente.sourceId}`)
       await cola.encolar(
         siguiente.kind,
-        [siguiente.sourceId],
+        // Sin --aplicar, momentos solo enseña la propuesta y no escribe clips.json.
+        siguiente.kind === 'momentos' ? [siguiente.sourceId, '--aplicar'] : [siguiente.sourceId],
         ETIQUETAS[siguiente.kind](siguiente.sourceId),
       )
       alEncolar?.()

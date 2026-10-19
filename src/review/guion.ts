@@ -9,6 +9,7 @@
  * Salio de page.ts por el mismo motivo que el CSS, explicado en estilos.ts.
  */
 import { espiral } from './marca.js'
+import { ICONOS } from './iconos.js'
 
 export const GUION = `/*
  * Cuatro secciones, no nueve.
@@ -25,17 +26,25 @@ export const GUION = `/*
  * El orden es el del dia a dia: subir un video, revisarlo, ver cuando sale.
  * Todo lo que se toca una vez y no se vuelve a mirar vive en Ajustes.
  */
+/*
+ * FASE 3: seis secciones, en el orden del flujo.
+ *
+ * Añadir (Videos) -> Procesar -> Revisar -> Publicar (Agenda), con Inicio
+ * diciendo que toca ahora y Cuentas y Ajustes para lo que se configura una vez.
+ * Videos y Cuentas salen de Inicio y de Ajustes, donde estaban mezclados con
+ * otras cosas.
+ */
 const SECCIONES = {
   inicio:  { titulo: 'Inicio',   vistas: [['proceso', 'Inicio']] },
+  videos:  { titulo: 'Videos',   vistas: [['videos', 'Videos']] },
   revisar: { titulo: 'Revisar',  vistas: [['clips', 'Revisar']] },
   agenda:  { titulo: 'Agenda',   vistas: [['cola', 'Calendario'], ['metricas', 'Resultados']] },
+  cuentas: { titulo: 'Cuentas',  vistas: [['plataformas', 'Cuentas'], ['proyectos', 'Clientes']] },
   config:  { titulo: 'Ajustes',  vistas: [
-    ['proyectos', 'Clientes'],
-    ['plataformas', 'Cuentas'],
-    ['flujo', 'Horarios'],
-    ['ajustes', 'Marca y textos'],
+    ['ajustes', 'Estilo'],
     ['ia', 'IA'],
-    ['registro', 'Historial'],
+    ['flujo', 'Horarios'],
+    ['registro', 'Sistema'],
     ['usuarios', 'Usuarios'],
   ] },
 };
@@ -84,7 +93,10 @@ const SECCION_DE = Object.fromEntries(
  * elegido. Aqui se dice a mano de quien depende, y el rastro de migas de arriba
  * se encarga del camino de vuelta.
  */
-SECCION_DE.vod = 'inicio';
+SECCION_DE.vod = 'videos';
+
+/* Los iconos de trazo, servidos una vez con el guion. */
+const ICONOS = ${JSON.stringify(ICONOS)};
 
 const state = {
   view: 'proceso',
@@ -328,7 +340,9 @@ function abrirAvisos(abrir) {
 
 /** Abre o cierra el menu lateral. */
 function menu(abrir) {
-  document.getElementById('nav').classList.toggle('abierto', abrir);
+  const mas = document.getElementById('mas');
+  if (mas) mas.hidden = !abrir;
+  document.getElementById('menu')?.setAttribute('aria-expanded', String(Boolean(abrir)));
   document.getElementById('fondo').classList.toggle('abierto', abrir);
 }
 
@@ -418,7 +432,7 @@ async function cargarMetricas() {
  * en cada cambio de seccion.
  */
 async function refrescar() {
-  if (state.view === 'proceso') await cargarProceso();
+  if (state.view === 'proceso' || state.view === 'videos') await cargarProceso();
   if (state.view === 'clips') await cargarClips();
   if (state.view === 'cola') state.queue = await api('/api/queue');
   if (state.view === 'registro') state.runs = await api('/api/runs');
@@ -980,198 +994,341 @@ function pintarNube(o) {
   '</div></div></article>';
 }
 
+// --- Fase 3: Inicio y Videos ------------------------------------------------
+
+/** Un icono de trazo (lucide). La lista viene de src/review/iconos.ts. */
+function ico(nombre, clase) {
+  return '<svg class="ico-svg' + (clase ? ' ' + clase : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    (ICONOS[nombre] || '') + '</svg>';
+}
+
+/*
+ * En que punto esta un video, en cuatro etapas.
+ *
+ * Descargar y transcribir son una sola tarea por dentro, pero se enseñan por
+ * separado porque son las dos esperas que se notan: la duracion aparece al
+ * descargar y el texto al transcribir.
+ */
+const ETAPAS = ['Descargar', 'Transcribir', 'Buscar momentos', 'Armar clips'];
+
+function estadoVideo(s, o) {
+  const activo = state.jobs.find(j => vivo(j) && j.args && j.args[0] === s.sourceId);
+  const hechos = [
+    s.durationMin !== null || s.hasTranscript,
+    s.hasTranscript,
+    s.clips > 0,
+    s.rendered > 0,
+  ];
+  const ahora = hechos.indexOf(false);
+  // Un fallo cuenta si es lo ULTIMO que paso con este video.
+  const suyos = state.jobs.filter(j => j.args && j.args[0] === s.sourceId);
+  const ultimo = suyos[0];
+  const error = !activo && ultimo && ultimo.status === 'error' ? ultimo : null;
+  const esperaIA = suyos.some(j => j.status === 'en_espera_ia');
+  const pendientes = Math.max(0, s.clips - (s.approved ?? 0) - (s.rejected ?? 0));
+  const listo = ahora === -1;
+  return { activo, hechos, ahora, error, esperaIA, pendientes, listo };
+}
+
+function notaVideo(s, e, o) {
+  if (e.error) return 'Algo falló en «' + (ETAPAS[Math.max(0, e.ahora)] || 'el último paso') + '». Puedes reintentarlo.';
+  if (e.esperaIA) return o.ia ? textoIA(o.ia) + '.' : 'Esperando a la IA.';
+  if (e.listo) {
+    return e.pendientes > 0
+      ? (e.pendientes === 1 ? '1 clip espera tu revisión.' : e.pendientes + ' clips esperan tu revisión.')
+      : (s.clips > 0 && (s.rejected ?? 0) >= s.clips ? 'Se descartaron todos sus clips.' : 'Revisado. Lo aprobado ya va a la agenda.');
+  }
+  if (e.ahora === 0) {
+    return e.activo ? 'Descargando el video.' : 'La descarga no terminó. Vuelve a añadirlo o sube el MP4.';
+  }
+  const textos = ['', 'Sacando el texto de lo que se dice.', 'Buscando los mejores momentos.', 'Armando los clips.'];
+  return e.activo ? textos[e.ahora] : 'En cola: empezará en cuanto el procesador esté libre.';
+}
+
+/** Tarjeta de un video, con sus cuatro etapas. */
+function pintarVideo(s, o) {
+  const e = estadoVideo(s, o);
+  const etapas = ETAPAS.map((nombre, i) => {
+    const hecha = e.hechos[i];
+    const actual = i === e.ahora;
+    const clase = hecha ? 'hecha' : actual ? (e.error ? 'fallo' : e.activo ? 'activa' : 'actual') : '';
+    return '<li class="etapa ' + clase + '">' +
+      '<span class="etapa-nombre">' + nombre + '</span>' +
+      '<span class="etapa-barra"><i></i></span>' +
+    '</li>';
+  }).join('');
+
+  const chip = e.error ? '<span class="estado-chip error">' + ico('alerta') + 'Con error</span>'
+    : e.esperaIA ? '<span class="estado-chip aviso">' + ico('reloj') + 'Espera a la IA</span>'
+    : e.listo ? '<span class="estado-chip ok">' + ico('hecho') + 'Listo</span>'
+    : e.activo ? '<span class="estado-chip info"><span class="vivo-punto"></span>Procesando</span>'
+    : '<span class="estado-chip">' + ico('reloj') + 'En cola</span>';
+
+  const acciones = [];
+  if (e.activo) acciones.push('<button class="chip" data-cancel="' + e.activo.id + '">' + ico('cerrar') + 'Cancelar</button>');
+  if (e.error) acciones.push('<button class="chip" data-grupo-reintentar="' + e.error.id + '">' + ico('reintentar') + 'Reintentar</button>');
+  if (e.ahora === 0 && !e.activo) {
+    acciones.push('<button class="chip" data-ir="videos" data-modo="subir">' + ico('subir') + 'Subir MP4</button>');
+    acciones.push('<button class="chip" data-quitar-vod="' + esc(s.sourceId) + '">Quitar</button>');
+  }
+  if (e.pendientes > 0) {
+    acciones.push('<button class="chip primario" data-ir="clips">' + ico('revisar') + 'Revisar ' +
+      (e.pendientes === 1 ? '1 clip' : e.pendientes + ' clips') + '</button>');
+  }
+  acciones.push('<button class="chip" data-vod="' + esc(s.sourceId) + '">Ver detalles</button>');
+
+  return '<article class="card video-card' + (e.activo ? ' trabajando' : '') + '"><div class="body">' +
+    '<div class="video-cab">' +
+      '<button class="srctitle" data-vod="' + esc(s.sourceId) + '">' + esc(s.title) + '</button>' +
+      chip +
+    '</div>' +
+    '<p class="video-meta">' +
+      (s.durationMin !== null ? '<span class="dato">' + s.durationMin + ' min</span>' : 'Duración pendiente') +
+      (s.clips > 0 ? ' · ' + plural(s.clips, 'momento') : '') +
+    '</p>' +
+    '<ol class="etapas">' + etapas + '</ol>' +
+    '<p class="video-nota">' + esc(notaVideo(s, e, o)) + '</p>' +
+    '<div class="chips">' + acciones.join('') + '</div>' +
+  '</div></article>';
+}
+
+/** Añadir un video: enlace o MP4, tipo y campaña. */
+function bloqueAnadir(o, compacto) {
+  const modo = state.anadirModo || 'enlace';
+  const tipo = state.tipoVideo || 'entrevista';
+  const campanas = state.proyectos?.campanas ?? [];
+  const selectorCampana = campanas.length && !compacto
+    ? '<div class="field"><label for="campana-vod">Campaña</label>' +
+        '<select id="campana-vod">' + opcionesCampana(campanas, state.campanaElegida) + '</select></div>'
+    : '';
+  const tipos = [['entrevista', 'Entrevista'], ['stream', 'Stream'], ['musica', 'Video musical']];
+  const apagado = o.trabajador && !o.trabajador.vivo
+    ? '<p class="warn" style="margin:0 0 var(--s3)">El procesador está desconectado' +
+        (o.trabajador.vistoEn ? ' desde ' + hace(o.trabajador.vistoEn) : '') +
+        '. Puedes añadir el video igual: empezará en cuanto se conecte.</p>'
+    : '';
+
+  return '<article class="card anadir-card"><div class="body">' +
+    (compacto ? '<p class="ante">Añadir video</p>' : '') +
+    apagado +
+    '<div class="segmento" role="tablist" aria-label="Cómo añadirlo">' +
+      '<button role="tab" data-anadir-modo="enlace" aria-selected="' + (modo === 'enlace') + '">' + ico('enlace') + 'Enlace</button>' +
+      '<button role="tab" data-anadir-modo="subir" aria-selected="' + (modo === 'subir') + '">' + ico('subir') + 'Subir MP4</button>' +
+    '</div>' +
+    (compacto ? '' :
+      '<fieldset class="tipos"><legend>Tipo de video</legend>' +
+        tipos.map(([v, t]) =>
+          '<label class="tipo"><input type="radio" name="tipo-video" value="' + v + '"' + (tipo === v ? ' checked' : '') + '>' +
+          '<span>' + t + '</span></label>').join('') +
+      '</fieldset>' +
+      (tipo === 'musica'
+        ? '<p class="reason" style="margin:0 0 var(--s3)">Se buscan los estribillos midiendo el audio, sin usar la IA. ' +
+          'La música con derechos de autor puede ser bloqueada o silenciada por las plataformas.</p>'
+        : '')) +
+    selectorCampana +
+    (modo === 'enlace'
+      ? '<div class="field"><label for="url">Enlace del video</label>' +
+          '<div class="fila-input"><input id="url" type="url" inputmode="url" placeholder="https://youtube.com/…" autocomplete="off" spellcheck="false">' +
+          '<button class="act go" id="ingest">Añadir</button></div></div>'
+      : '<div class="drop" id="drop" role="button" tabindex="0">' + ico('subir') +
+          '<span>Toca para elegir un MP4, o arrástralo aquí</span></div>' +
+        '<input type="file" id="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" hidden>' +
+        '<div class="barra" id="barra" hidden><i></i></div>' +
+        '<p class="reason" id="subiendo" style="margin:8px 0 0"></p>') +
+  '</div></article>';
+}
+
+function vistaVideos() {
+  const o = state.overview;
+  if (!o) return esqueleto(3, false);
+
+  const filtro = state.filtroVideos || 'todos';
+  const conEstado = o.sources.map(s => ({ s, e: estadoVideo(s, o) }));
+  const grupos = {
+    todos: conEstado,
+    proceso: conEstado.filter(x => !x.e.listo && !x.e.error),
+    listos: conEstado.filter(x => x.e.listo),
+    error: conEstado.filter(x => x.e.error),
+  };
+  const filtros = [['todos', 'Todos'], ['proceso', 'En proceso'], ['listos', 'Listos'], ['error', 'Con error']];
+  const lista = grupos[filtro] || conEstado;
+
+  return '<div class="rejilla-videos">' +
+    '<section class="col-anadir">' + bloqueAnadir(o, false) + '</section>' +
+    '<section class="col-lista">' +
+      '<div class="filtros" role="tablist" aria-label="Filtrar videos">' +
+        filtros.map(([v, t]) =>
+          '<button class="tab" role="tab" data-filtro-videos="' + v + '" aria-selected="' + (filtro === v) + '">' +
+            t + ' <span class="dato">' + grupos[v].length + '</span></button>').join('') +
+      '</div>' +
+      (lista.length === 0
+        ? '<div class="empty"><b>' + (o.sources.length === 0 ? 'Todavía no hay videos' : 'Nada en este filtro') + '</b>' +
+            (o.sources.length === 0 ? 'Pega un enlace o sube un MP4 para empezar.' : 'Prueba con «Todos».') + '</div>'
+        : '<div class="cascada">' + lista.map(x => pintarVideo(x.s, o)).join('') + '</div>') +
+    '</section>' +
+  '</div>';
+}
+
+/** Las cuatro tarjetas del flujo, con su numero. */
+function pintarFlujo(o) {
+  const procesando = o.sources.filter(s => { const e = estadoVideo(s, o); return !e.listo && !e.error; }).length;
+  const pasos = [
+    ['procesando', 'Procesando', procesando, 'videos', 'procesando', procesando === 1 ? 'video' : 'videos'],
+    ['revisar', 'Por revisar', o.clips.pending, 'clips', 'bandeja', o.clips.pending === 1 ? 'clip' : 'clips'],
+    ['aprobados', 'Aprobados', o.clips.approved, 'clips', 'aprobado', o.clips.approved === 1 ? 'clip' : 'clips'],
+    ['agenda', 'En agenda', o.queue.total, 'cola', 'agenda', o.queue.total === 1 ? 'salida' : 'salidas'],
+  ];
+  return '<div class="flujo cascada">' + pasos.map(([id, nombre, n, ir, icono, unidad], i) =>
+    '<button class="paso-flujo' + (id === 'revisar' && n > 0 ? ' pide' : '') + '" data-ir="' + ir + '">' +
+      '<span class="paso-cab">' + ico(icono) + '<span class="paso-num dato">' + (i + 1) + '</span></span>' +
+      '<b data-contar="' + id + '">' + n + '</b>' +
+      '<span class="paso-nombre">' + nombre + '</span>' +
+      '<span class="paso-unidad">' + unidad + '</span>' +
+    '</button>').join('') + '</div>';
+}
+
+/** La tarjeta grande: que te toca ahora. */
+function pintarSiguienteNuevo(o) {
+  let titulo, sub, boton;
+  if (o.ia && o.ia.pausada) {
+    titulo = textoIA(o.ia);
+    sub = o.ia.estado === 'sin_sesion'
+      ? 'En el ordenador que procesa, abre Claude Code y escribe /login. Después pulsa Reintentar.'
+      : 'Lo que necesita la IA espera; el resto sigue funcionando.';
+    boton = '<button class="act go" data-ia-reintentar="1">' + ico('reintentar') + 'Reintentar</button>';
+  } else if (o.clips.pending > 0) {
+    titulo = o.clips.pending === 1 ? '1 clip espera tu revisión' : o.clips.pending + ' clips esperan tu revisión';
+    sub = 'Aprueba los que valgan y descarta el resto. Es lo único que no hace el programa solo.';
+    boton = '<button class="act go" data-ir="clips">' + ico('revisar') + 'Revisar ahora</button>';
+  } else if (o.sources.length === 0) {
+    titulo = 'Añade un video para empezar';
+    sub = 'Pega un enlace de YouTube o sube un MP4. El programa hace el resto.';
+    boton = '<button class="act go" data-ir="videos">' + ico('mas') + 'Añadir video</button>';
+  } else {
+    const p = siguientePaso(o);
+    titulo = p.texto;
+    sub = p.sub;
+    boton = p.accion
+      ? '<button class="act go" ' + (p.accion.vista ? 'data-ir="' + p.accion.vista + '"'
+          : 'data-run="' + p.accion.kind + '"' + (p.accion.source ? ' data-source="' + esc(p.accion.source) + '"' : '')) +
+        '>' + p.accion.label + '</button>'
+      : '';
+  }
+  return '<article class="card siguiente paso-1"><div class="body">' +
+    '<p class="ante">Siguiente paso</p>' +
+    '<h2>' + esc(titulo) + '</h2>' +
+    '<p class="reason">' + esc(sub) + '</p>' +
+    (boton ? '<div class="actions">' + boton + '</div>' : '') +
+  '</div></article>';
+}
+
+/** Procesador, IA y TikTok, de un vistazo. */
+function pintarSistema(o) {
+  const t = o.trabajador;
+  const plats = (o.plataformas ?? []).filter(p => p.estado !== 'no-disponible');
+  const tiktok = plats.find(p => /tiktok/i.test(p.nombre || ''));
+  const filas = [
+    ['procesador', 'Procesador',
+      t && t.vivo ? 'conectado' : t && t.vistoEn ? 'desconectado desde ' + hace(t.vistoEn) : 'sin conectar',
+      t && t.vivo ? '' : 'apagado'],
+    ['ia', 'IA', o.ia ? textoIA(o.ia).replace(/^IA /, '') : 'sin comprobar',
+      !o.ia || o.ia.estado === 'lista' ? '' : o.ia.pausada ? 'apagado' : 'espera'],
+    ['movil', 'TikTok', tiktok ? (tiktok.estado === 'conectado' ? 'conectado' : 'sin conectar') : 'sin conectar',
+      tiktok && tiktok.estado === 'conectado' ? '' : 'espera'],
+  ];
+  return '<article class="card sistema"><div class="body">' +
+    '<p class="ante">Estado del sistema</p>' +
+    '<ul class="estado-lista">' + filas.map(([i, nombre, texto, clase]) =>
+      '<li>' + ico(i) + '<span class="estado-nombre">' + nombre + '</span>' +
+      '<span class="estado-texto">' + esc(texto) + '</span>' +
+      '<span class="vivo-punto ' + clase + '" role="img" aria-label="' + (clase === '' ? 'Bien' : clase === 'apagado' ? 'Mal' : 'Atención') + '"></span></li>'
+    ).join('') + '</ul>' +
+    '<button class="chip" data-ir="registro">Probar el sistema</button>' +
+  '</div></article>';
+}
+
+/** Lo ultimo que termino, en una lista corta. */
+function pintarActividad() {
+  const hechas = state.jobs.filter(j => j.status === 'ok' && j.endedAt).slice(0, 5);
+  return '<article class="card"><div class="body">' +
+    '<p class="ante">Actividad reciente</p>' +
+    (hechas.length === 0
+      ? '<p class="reason" style="margin:0">Todavía no ha terminado nada.</p>'
+      : '<ul class="actividad">' + hechas.map(j =>
+          '<li>' + ico('hecho') + '<span>' + esc(nombreTarea(j)) + '</span><time>' + hace(j.endedAt) + '</time></li>'
+        ).join('') + '</ul>') +
+  '</div></article>';
+}
+
+/** El nombre de una tarea como se dice en el panel. */
+function nombreTarea(j) {
+  const etiquetas = {
+    ingest: 'Video descargado y transcrito', select: 'Momentos encontrados', momentos: 'Estribillos encontrados',
+    render: 'Clips armados', subir: 'Clips listos para revisar', variants: 'Copias por cuenta hechas',
+    schedule: 'Salidas repartidas en la agenda', publish: 'Clips publicados', metrics: 'Resultados actualizados',
+    'probar-ia': 'IA probada', doctor: 'Sistema probado',
+  };
+  return etiquetas[j.kind] || j.label;
+}
+
 function vistaProceso() {
   const o = state.overview;
   if (!o) return esqueleto(2, true);
 
-  const activo = state.jobs.find(vivo);
-  const ocupado = Boolean(activo);
-  /*
-   * En Inicio solo lo que pide atencion, o sea lo que fallo.
-   *
-   * Antes salia el historial entero: seis tarjetas de trabajos terminados que
-   * no hacen falta en la pantalla donde se empieza a trabajar, y que ademas se
-   * repiten ahora que el historial completo tiene su propio sitio en Ajustes.
-   */
   const fallos = agruparFallos(state.jobs).slice(0, 3);
+  const avisos = pintarAvisoIA(o.ia) + fallos.map(pintarGrupoFallo).join('');
 
-  let html = '';
-
-  // Si hay algo corriendo, eso ES el estado y va primero. Si no, lo primero es
-  // que toca hacer.
-  html += activo ? pintarJob(activo, true) : pintarSiguiente(o, ocupado);
-  html += pintarAvisoIA(o.ia);
-
-  html += '<div class="card paso-2"><div class="stats">' +
-    '<div><b' + (o.clips.pending > 0 ? ' style="color:var(--azul-texto)"' : '') + '>' +
-      o.clips.pending + '</b><span>Por revisar</span></div>' +
-    '<div><b' + (o.clips.approved > 0 ? ' style="color:var(--indigo-texto)"' : '') + '>' +
-      o.clips.approved + '</b><span>Aprobados</span></div>' +
-    '<div><b>' + o.queue.total + '</b><span>En cola</span></div>' +
-  '</div></div>';
-
-  /*
-   * Cuanto se ha producido, y por donde sale.
-   *
-   * Va en gris y en una linea, no en un segundo bloque de cifras grandes. Los
-   * numeros de arriba son estado y piden una decision; estos son contexto. Dos
-   * rejillas identicas seguidas harian competir cinco cifras por la misma
-   * atencion y ninguna ganaria.
-   */
-  html += pintarRitmo(o);
-  html += pintarNube(o);
-
-  /*
-   * Campaña de destino, comun al enlace y a la subida.
-   *
-   * Se elige ANTES de mandar el video y no despues, porque el identificador del
-   * VOD lo decide la descarga: hasta que termina no hay nada a lo que colgarle
-   * una campaña, y pedirlo entonces significa acordarse media hora mas tarde.
-   *
-   * Sin campañas creadas no se enseña el desplegable: un selector con una sola
-   * opcion que dice "Sin asignar" solo ocupa sitio.
-   */
-  const campanas = state.proyectos?.campanas ?? [];
-  const selectorCampana = campanas.length
-    ? '<div class="field">' +
-        '<label for="campana-vod">Campaña</label>' +
-        '<select id="campana-vod">' + opcionesCampana(campanas, state.campanaElegida) + '</select>' +
-      '</div>'
-    : '';
-
-  html += seccion('&#43;', 'Añadir un video', 'Pega un enlace de YouTube o sube un MP4. El programa lo descarga, saca el texto y busca los mejores momentos.') +
-    '<article class="card"><div class="body">' +
-      /*
-       * Si no hay ordenador escuchando, se dice ANTES de pegar el enlace.
-       *
-       * Descargar y renderizar los hace el PC de casa, no el servidor: el
-       * panel solo apunta la tarea. Encolarla con el ordenador apagado es
-       * legitimo -- se procesa en cuanto lo enciendas -- pero verlo despues,
-       * mirando una tarea que no avanza, es lo que hace pensar que esta roto.
-       */
-      (o.trabajador && !o.trabajador.vivo
-        ? '<p class="warn" style="margin:0 0 var(--s3)">' +
-            'El ordenador que procesa los videos no esta escuchando' +
-            (o.trabajador.vistoEn
-              ? ' (visto por ultima vez ' + hace(o.trabajador.vistoEn) + ')'
-              : ' todavia') +
-            '. Puedes añadir el video igual: se quedara esperando y empezara ' +
-            'en cuanto lo enciendas.' +
-          '</p>'
-        : '') +
-      selectorCampana +
-      '<div class="field">' +
-        '<label>Pega un enlace</label>' +
-        '<input id="url" placeholder="https://..." autocomplete="off" spellcheck="false">' +
+  return pintarFlujo(o) +
+    '<div class="rejilla-inicio">' +
+      '<div class="col-principal">' +
+        pintarSiguienteNuevo(o) +
+        (avisos ? '<section aria-label="Avisos"><p class="ante">Avisos</p>' + avisos + '</section>' : '') +
+        pintarActividad() +
       '</div>' +
-      '<div class="actions" style="margin-bottom:var(--s4)">' +
-        '<button class="act sec" id="ingest"' + (ocupado ? ' disabled' : '') + '>' +
-          (ocupado ? 'Hay un trabajo en curso' : 'Descargar y transcribir') +
-        '</button>' +
+      '<div class="col-lateral">' +
+        pintarSistema(o) +
+        bloqueAnadir(o, true) +
+        pintarNube(o) +
       '</div>' +
-      '<label>O sube un video de tu movil</label>' +
-      '<div class="drop" id="drop">' +
-        (ocupado ? 'Espera a que acabe el trabajo en curso' : 'Toca para elegir un MP4, o arrastralo aqui') +
-      '</div>' +
-      '<input type="file" id="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" hidden>' +
-      '<div class="barra" id="barra" hidden><i></i></div>' +
-      '<p class="reason" id="subiendo" style="margin:8px 0 0"></p>' +
-      '<p class="reason" style="margin:var(--s3) 0 0">Vale cualquier video de movil o camara. ' +
-      'Cuando acabe, los videos te esperaran en Revisar.</p>' +
-    '</div></article>';
+    '</div>';
+}
 
-  /*
-   * Los videos terminados se pliegan.
-   *
-   * La lista los enseñaba todos siempre, y cada uno ocupa su fila de pasos con
-   * sus botones. Con once videos eso eran cuatro pantallas de scroll para
-   * encontrar el unico que estaba a medias, y los diez de arriba no admitian
-   * ninguna accion util: ya estaban hechos.
-   *
-   * "Terminado" es: no queda nada por revisar Y o se descarto entero o ya esta
-   * repartido. Es decir, no hay ningun paso siguiente que dar.
-   *
-   * Lo repartido se mide por los envios en la cola, no por el contador de
-   * copias: ese contador solo se escribe cuando el reparto pasa por el
-   * trabajador, asi que marcaba cero en videos con doscientos envios puestos.
-   */
-  const terminado = s =>
-    s.hasTranscript && s.clips > 0 &&
-    s.approved + s.rejected >= s.clips &&
-    (s.rejected >= s.clips || ((o.enCola ?? {})[s.sourceId] ?? 0) > 0);
-
-  const enMarcha = o.sources.filter(s => !terminado(s));
-  const hechos = o.sources.filter(terminado);
-
-  const ficha = s => pintarFuente(
-    s,
-    ocupado,
-    o.variants[s.sourceId] ?? 0,
-    // Los pasos select, render, subir y variants llevan el sourceId como
-    // primer argumento. El ingest no: su identificador no existe hasta
-    // que el video se descarga, asi que ese trabajo no se atribuye a
-    // ninguna tarjeta y ninguna late. Es correcto: todavia no hay tarjeta.
-    Boolean(activo && activo.args && activo.args[0] === s.sourceId),
-    (o.subidos ?? {})[s.sourceId] ?? 0,
-  );
-
-  html += seccion('&#9635;', 'Tus videos', 'En que punto va cada uno. El circulo azul marca el paso en el que esta ahora mismo.') +
-    '<article class="card">' +
-      (o.sources.length === 0
-        ? '<div class="empty" style="padding:34px 20px">Todavia no hay ninguno.</div>'
-        : (enMarcha.length === 0
-            ? '<div class="empty" style="padding:34px 20px">Todo al dia. ' +
-              'Añade un video para empezar otro.</div>'
-            : enMarcha.map(ficha).join('')) +
-          (hechos.length > 0
-            ? '<details class="plegable" style="padding:0 var(--s4) var(--s4)">' +
-              '<summary>' + plural(hechos.length, 'video terminado', 'videos terminados') +
-              '</summary>' + hechos.map(ficha).join('') + '</details>'
-            : '')) +
-    '</article>';
-
-  /*
-   * El reparto ya no es un boton, es una frase.
-   *
-   * Esto era una tarjeta con "Repartir entre las cuentas" y "Probar", y era el
-   * ultimo sitio del panel donde habia que acordarse de dar una orden: aprobar
-   * no bastaba, habia que volver aqui y pulsar. Desde que terminar de revisar
-   * un video encola el reparto solo, el boton sobra; lo que hace falta es
-   * contar lo que esta pasando.
-   *
-   * Queda un enlace discreto para rehacerlo, porque sigue habiendo un caso real
-   * en el que hace falta: cambiar los horarios no vuelve a repartir lo que ya
-   * estaba colocado.
-   */
-  html += seccion('&#9741;', 'Reparto', 'Como se colocan tus videos aprobados entre las cuentas. Va solo; no tienes que lanzarlo.') +
-    '<article class="card flat"><div class="body">' +
-      '<p class="lead" style="margin:0">' +
-        (o.clips.approved === 0
-          ? 'Cuando apruebes videos se repartiran solos entre tus <b>' + o.accounts + '</b> cuentas.'
-          : (o.clips.approved === 1
-              ? 'Tu <b>1</b> video aprobado se reparte'
-              : 'Tus <b>' + o.clips.approved + '</b> videos aprobados se reparten') +
-            ' entre <b>' + o.accounts + '</b> cuentas. Hay <b>' + o.queue.total + '</b> ' +
-            (o.queue.total === 1 ? 'envio programado' : 'envios programados') + '.') +
-      '</p>' +
-      '<details class="nota"><summary>No tienes que hacer nada</summary>' +
-        '<p>Al terminar de revisar un video, el programa prepara las copias y ' +
-        'las coloca en el calendario solo. Puedes verlo en Agenda.</p>' +
-        '<p>Si cambias los horarios y quieres recolocar lo que ya estaba puesto, ' +
-        'usa esto: <button class="chip" data-run="schedule"' + (ocupado ? ' disabled' : '') +
-        '>Rehacer el reparto</button></p>' +
-      '</details>' +
-    '</div></article>';
-
-  // Solo si hay algo roto. Un Inicio limpio significa que no hay nada que mirar.
-  if (fallos.length > 0) {
-    html += seccion('&#9888;', 'Algo falló', 'Trabajos que no salieron bien. Si está vacío, no hay nada que mirar.') +
-      fallos.map(pintarGrupoFallo).join('') +
-      '<p class="reason" style="margin:var(--s3) 0 0">' +
-      'El resto de lo que ha pasado está en Ajustes, en Historial.</p>';
+/*
+ * Numeros que cuentan al cambiar.
+ *
+ * Solo cuando el numero CAMBIA respecto a lo ultimo pintado: contar en cada
+ * repintado (llega un aviso del servidor varias veces por minuto) convertiria
+ * la señal en ruido. Con movimiento reducido se pone el valor sin mas.
+ */
+function animarCifras() {
+  state.cifras = state.cifras || {};
+  const quieto = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const el of document.querySelectorAll('[data-contar]')) {
+    const clave = el.dataset.contar;
+    const fin = Number(el.textContent) || 0;
+    const ini = state.cifras[clave];
+    state.cifras[clave] = fin;
+    if (ini === undefined || ini === fin || quieto) continue;
+    const t0 = performance.now();
+    const dura = 450;
+    const paso = (t) => {
+      const k = Math.min(1, (t - t0) / dura);
+      const suave = 1 - Math.pow(1 - k, 3);
+      el.textContent = String(Math.round(ini + (fin - ini) * suave));
+      if (k < 1) requestAnimationFrame(paso);
+    };
+    requestAnimationFrame(paso);
   }
+}
 
-  return html;
+/** Estado del procesador en el menu. */
+function pintarEstadoMenu() {
+  const el = document.getElementById('nav-estado');
+  const t = state.overview && state.overview.trabajador;
+  if (!el || !t) return;
+  el.innerHTML = '<div class="fila-estado"><span class="vivo-punto' + (t.vivo ? '' : ' apagado') + '"></span>' +
+    (t.vivo ? 'Procesador conectado' : 'Procesador desconectado') + '</div>' +
+    (!t.vivo && t.vistoEn ? '<span class="reason" style="margin:0">Visto ' + hace(t.vistoEn) + '</span>' : '');
 }
 
 /**
@@ -3172,6 +3329,9 @@ function render() {
     : '';
 
   if (state.view === 'proceso') view.innerHTML = vistaProceso();
+  if (state.view === 'videos') view.innerHTML = vistaVideos();
+  animarCifras();
+  pintarEstadoMenu();
   if (state.view === 'clips') view.innerHTML = vistaClips();
   if (state.view === 'cola') view.innerHTML = vistaCola();
   if (state.view === 'registro') view.innerHTML = vistaRegistro();
@@ -3368,7 +3528,7 @@ async function pintarLog(id) {
 }
 
 document.addEventListener('click', async e => {
-  if (e.target.closest('#menu')) { menu(true); return; }
+  if (e.target.closest('#menu')) { menu(document.getElementById('mas').hidden); return; }
   if (e.target.id === 'fondo') { menu(false); return; }
 
   if (e.target.closest('#campana')) { abrirAvisos(!state.avisos); return; }
@@ -3738,7 +3898,7 @@ document.addEventListener('click', async e => {
     const url = input.value.trim();
     if (!url) { input.focus(); return; }
     input.value = '';
-    lanzar('ingest', { url, campanaId: campanaElegida() });
+    lanzar('ingest', { url, campanaId: campanaElegida(), tipo: state.tipoVideo || 'entrevista' });
   }
 });
 
@@ -3778,6 +3938,7 @@ function subir(file) {
   xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
   const campana = campanaElegida();
   if (campana) xhr.setRequestHeader('x-campana', campana);
+  if (state.tipoVideo === 'musica') xhr.setRequestHeader('x-tipo', 'musica');
 
   const mb = b => (b / 1048576).toFixed(0);
 
@@ -5457,4 +5618,17 @@ function notaDelPlan(d, actual) {
 
   return trozos.join('');
 }
+
+// Fase 3: controles de Añadir video y filtros de Videos.
+document.addEventListener('click', e => {
+  const modo = e.target.closest('[data-anadir-modo]');
+  if (modo) { state.anadirModo = modo.dataset.anadirModo; render(); return; }
+  const filtro = e.target.closest('[data-filtro-videos]');
+  if (filtro) { state.filtroVideos = filtro.dataset.filtroVideos; render(); return; }
+  const ir = e.target.closest('[data-ir][data-modo]');
+  if (ir) state.anadirModo = ir.dataset.modo;
+});
+document.addEventListener('change', e => {
+  if (e.target.name === 'tipo-video') { state.tipoVideo = e.target.value; render(); }
+});
 `

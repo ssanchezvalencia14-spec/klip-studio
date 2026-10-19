@@ -46,6 +46,19 @@ import { renderPerdido } from './perdido.js'
 import { BadRequest, buildJob } from './pipeline.js'
 import { storeUpload, UploadError } from './upload.js'
 import { createEstadoIA, iaPausada, textoEstadoIA } from '../llm/estado.js'
+import { createAuth, ErrorUsuarios, permitido, type Auth } from '../auth/auth.js'
+import {
+  atenderAcceso,
+  esCifrada,
+  galletaSesion,
+  legadoActivo,
+  mismoOrigen,
+  negarPermiso,
+  pedirLogin,
+  quienEs,
+  sinLoginActivo,
+  type Quien,
+} from './acceso.js'
 
 const log = createLogger('review')
 
@@ -248,95 +261,6 @@ function authorized(req: IncomingMessage, url: URL): boolean {
   }
 
   return false
-}
-
-/**
- * Responde a quien no ha podido entrar.
- *
- * Con contraseña se pide por el camino de siempre, que hace salir el dialogo.
- * CON SOLO LLAVE NO: pedir autenticacion basica sacaria el dialogo a todo el que
- * llegue sin el enlace, que es exactamente lo que la llave venia a evitar. Se
- * responde 403 y se acaba.
- */
-function rechazar(res: ServerResponse): void {
-  const hayClave =
-    process.env.REVIEW_PASSWORD !== undefined && process.env.REVIEW_PASSWORD !== ''
-
-  if (hayClave) {
-    const body = JSON.stringify({ error: 'No autorizado' })
-    res.writeHead(401, {
-      'www-authenticate': 'Basic realm="Panel de revision", charset="UTF-8"',
-      'content-type': 'application/json; charset=utf-8',
-      'content-length': Buffer.byteLength(body),
-    })
-    res.end(body)
-    return
-  }
-
-  /*
-   * Una pagina de verdad, no una linea suelta.
-   *
-   * La primera version respondia texto plano: "No autorizado, abre el panel con
-   * tu enlace". Quien llegaba al dominio a secas veia una frase en una pagina
-   * en blanco, sin nada que pulsar y sin forma de avanzar. Un callejon.
-   *
-   * Aqui se explica que pasa y se ofrece la salida: pegar la llave. Quien tenga
-   * el enlace no vera esto nunca; es para quien llega escribiendo el dominio.
-   */
-  const body = `<!doctype html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KLIP studio</title>
-<style>
-  :root { --negro:#0D0D0D; --azul:#4160E6; --azul-texto:#5D77E9; --blanco:#FAFAFA; }
-  * { box-sizing: border-box; }
-  body {
-    margin:0; min-height:100vh; display:grid; place-items:center; padding:24px;
-    background:var(--negro); color:var(--blanco);
-    font:16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  }
-  .caja { width:100%; max-width:380px; text-align:center; }
-  .marca {
-    font-size:13px; letter-spacing:.18em; text-transform:uppercase;
-    color:var(--azul-texto); margin-bottom:28px;
-  }
-  h1 { font-size:21px; font-weight:600; margin:0 0 10px; }
-  p { margin:0 0 24px; color:#9BA1B0; font-size:14px; }
-  form { display:flex; flex-direction:column; gap:10px; }
-  input {
-    width:100%; padding:13px 15px; border-radius:9px;
-    border:1px solid #2A2D3A; background:#15161C; color:var(--blanco);
-    font-size:15px; font-family:inherit;
-  }
-  input::placeholder { color:#585E6E; }
-  input:focus { outline:none; border-color:var(--azul); }
-  button {
-    padding:13px 15px; border-radius:9px; border:0; cursor:pointer;
-    background:var(--azul); color:var(--blanco); font-size:15px;
-    font-weight:600; font-family:inherit;
-  }
-  button:hover { background:#3550D4; }
-  .pie { margin:24px 0 0; font-size:13px; color:#585E6E; }
-</style></head>
-<body><div class="caja">
-  <div class="marca">KLIP studio</div>
-  <h1>Te falta la llave</h1>
-  <p>Este panel se abre con un enlace propio. Abre el que guardaste
-     en favoritos, o pega aqui tu llave.</p>
-  <form method="GET" action="/">
-    <input name="k" placeholder="Pega tu llave" autofocus
-           autocomplete="off" spellcheck="false">
-    <button type="submit">Entrar</button>
-  </form>
-  <p class="pie">Se guarda en este navegador. Solo hace falta una vez.</p>
-</div></body></html>`
-
-  res.writeHead(403, {
-    'content-type': 'text/html; charset=utf-8',
-    'content-length': Buffer.byteLength(body),
-    'cache-control': 'no-store',
-  })
-  res.end(body)
 }
 
 /**
@@ -1041,25 +965,64 @@ interface Contexto {
    * clave y lo dice cuando alguien pide un video, en vez de no arrancar.
    */
   nube: Nube | null
+  /** Usuarios y sesiones. */
+  auth: Auth
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
 
-  if (!authorized(req, url)) {
-    rechazar(res)
-    return
+  // --- Quien entra -------------------------------------------------------------
+  //
+  // Publicas, sin sesion: el retorno de TikTok (lo protege su `state`), las
+  // paginas legales (las lee quien audita la app) y la propia entrada.
+  const publica = esRetornoDeTikTok(url) || esPaginaLegal(url)
+  if (!publica && (await atenderAcceso(req, res, url, ctx.auth))) return
+
+  let quien: Quien | null = null
+  if (!publica) {
+    const hayLlaveOClave = (process.env.REVIEW_KEY ?? '') !== '' || (process.env.REVIEW_PASSWORD ?? '') !== ''
+    const acceso = await quienEs(req, ctx.auth, () => hayLlaveOClave && authorized(req, url))
+    if (acceso === null) {
+      pedirLogin(req, res, url)
+      return
+    }
+    quien = acceso.quien
+    // La sesion se alarga mientras se usa: la galleta vuelve con 7 dias mas.
+    if (acceso.renovar && quien.token !== undefined) {
+      res.setHeader('set-cookie', galletaSesion(quien.token, esCifrada(req)))
+    }
+    // Con contraseña provisional, primero se cambia.
+    if (quien.usuario?.debeCambiar === true) {
+      if (url.pathname.startsWith('/api/')) sendJson(res, 403, { error: 'Antes tienes que cambiar tu contraseña.' })
+      else {
+        res.writeHead(303, { location: '/cuenta/contrasena' })
+        res.end()
+      }
+      return
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !mismoOrigen(req)) {
+      sendJson(res, 403, { error: 'Petición rechazada: no viene de este panel.' })
+      return
+    }
+    if (!permitido(quien.rol, req.method ?? 'GET', url.pathname)) {
+      negarPermiso(res)
+      return
+    }
   }
 
   /*
    * La llave llego en la direccion: se guarda y se quita de ahi.
+   *
+   * SOLO DURANTE LA TRANSICION (LEGACY_KEY_ENABLED=true). Se borrara junto con
+   * todo lo de la llave cuando el login este confirmado.
    *
    * Se guarda porque la pagina hace decenas de peticiones (datos, progreso en
    * vivo, videos) y ninguna llevaria el `?k=`. Y se quita de la barra porque una
    * direccion se comparte, se pega en un chat y acaba en el historial: la
    * galleta la mantiene fuera de la vista a partir de la primera visita.
    */
-  if (url.searchParams.has('k')) {
+  if (quien?.tipo === 'legado' && url.searchParams.has('k')) {
     const llave = url.searchParams.get('k') ?? ''
     url.searchParams.delete('k')
     // `secure` solo cuando de verdad se viaja cifrado. En el ordenador de casa
@@ -1076,8 +1039,73 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     return
   }
 
-  const { store, cola, runs, db, ownerId, nube } = ctx
+  const { store, cola, runs, db, ownerId, nube, auth } = ctx
   const path = url.pathname
+
+  // --- Usuarios -------------------------------------------------------------------
+
+  /** Quien soy: el panel lo usa para el menu y para esconder lo que no puedo tocar. */
+  if (path === '/api/yo' && req.method === 'GET') {
+    sendJson(res, 200, {
+      email: quien?.usuario?.email ?? null,
+      nombre: quien?.usuario?.nombre ?? '',
+      rol: quien?.rol ?? 'admin',
+      tipo: quien?.tipo ?? 'local',
+    })
+    return
+  }
+
+  // Solo administradores: `permitido` ya ha cortado a los demas.
+  if (path === '/api/usuarios' && req.method === 'GET') {
+    sendJson(res, 200, { usuarios: await auth.listar() })
+    return
+  }
+
+  if (path === '/api/usuarios' && req.method === 'POST') {
+    const b = (await readBody(req)) as Record<string, unknown>
+    try {
+      const u = await auth.crear({
+        email: String(b.email ?? ''),
+        nombre: String(b.nombre ?? ''),
+        rol: b.rol === 'admin' ? 'admin' : 'operador',
+        contrasena: String(b.contrasena ?? ''),
+        // La pone el administrador: la persona la cambia al entrar.
+        debeCambiar: true,
+      })
+      sendJson(res, 201, { usuario: u })
+    } catch (e) {
+      if (e instanceof ErrorUsuarios) sendJson(res, 400, { error: e.message })
+      else throw e
+    }
+    return
+  }
+
+  const usuarioRuta = /^\/api\/usuarios\/([0-9a-f-]{36})(\/contrasena)?$/.exec(path)
+  if (usuarioRuta !== null && req.method === 'POST') {
+    const id = usuarioRuta[1] ?? ''
+    const b = (await readBody(req)) as Record<string, unknown>
+    try {
+      if (usuarioRuta[2] !== undefined) {
+        // Recuperar contraseña sin correo: el administrador pone una nueva.
+        await auth.restablecer(id, String(b.contrasena ?? ''))
+        sendJson(res, 200, { ok: true })
+      } else {
+        if (id === quien?.usuario?.id && (b.activo === false || b.rol === 'operador')) {
+          sendJson(res, 400, { error: 'No puedes quitarte a ti el acceso de administrador.' })
+          return
+        }
+        const u = await auth.actualizar(id, {
+          ...(b.rol === 'admin' || b.rol === 'operador' ? { rol: b.rol } : {}),
+          ...(typeof b.activo === 'boolean' ? { activo: b.activo } : {}),
+        })
+        sendJson(res, 200, { usuario: u })
+      }
+    } catch (e) {
+      if (e instanceof ErrorUsuarios) sendJson(res, 400, { error: e.message })
+      else throw e
+    }
+    return
+  }
 
   if (path === '/' && req.method === 'GET') {
     const html = renderPage()
@@ -2414,6 +2442,7 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
     db,
     ownerId,
     nube: crearNube(),
+    auth: createAuth(db, ownerId),
   }
 
   // Subir un video dispara por si solo la busqueda de momentos y el render.
@@ -2440,11 +2469,19 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
    * quiera exponerlo sin ninguna tiene que pedirlo a proposito con
    * REVIEW_ALLOW_OPEN=1, que es un gesto deliberado y no un descuido.
    */
-  const tieneClave =
-    process.env.REVIEW_PASSWORD !== undefined && process.env.REVIEW_PASSWORD !== ''
-  const tieneLlave = process.env.REVIEW_KEY !== undefined && process.env.REVIEW_KEY !== ''
-  const abiertoAdrede = process.env.REVIEW_ALLOW_OPEN === '1'
-  const host = tieneClave || tieneLlave || abiertoAdrede ? '0.0.0.0' : '127.0.0.1'
+  /*
+   * Con login, el panel escucha en todas las interfaces: nada se ve sin
+   * sesion. La unica excepcion es KLIP_SIN_LOGIN=1 (vista previa de
+   * desarrollo), que entonces solo escucha en este ordenador.
+   */
+  const sinLogin = sinLoginActivo()
+  const host = sinLogin ? '127.0.0.1' : '0.0.0.0'
+
+  void ctx.auth.contar().then((n) => {
+    if (n === 0 && !sinLogin) {
+      console.log('  AVISO  : no hay ningun usuario. Crea el primero con: npm run crear-admin')
+    }
+  }).catch(() => {})
 
   server.listen(port, host, () => {
     console.log('')
@@ -2456,17 +2493,13 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
       }
     }
     console.log('')
-    if (tieneLlave) {
-      console.log('  acceso : con el enlace que lleva la llave (?k=...).')
-      if (tieneClave) console.log(`           Tambien vale el usuario "${REVIEW_USER}".`)
-    } else if (tieneClave) {
-      console.log(`  acceso : usuario "${REVIEW_USER}" + contraseña de REVIEW_PASSWORD`)
-    } else if (abiertoAdrede) {
-      console.log('  acceso : ABIERTO y visible en toda la red local (REVIEW_ALLOW_OPEN=1).')
-      console.log('           Cualquiera que llegue puede encolar tareas y subir archivos.')
+    if (sinLogin) {
+      console.log('  acceso : SIN LOGIN y solo desde este ordenador (KLIP_SIN_LOGIN=1).')
     } else {
-      console.log('  acceso : solo desde este ordenador.')
-      console.log('           Para abrirlo al movil, arranca con REVIEW_PASSWORD.')
+      console.log('  acceso : correo y contraseña (/login).')
+      if (legadoActivo()) {
+        console.log('           Tambien la llave antigua (LEGACY_KEY_ENABLED=true). Quitala al confirmar el login.')
+      }
     }
     if (esRemoto()) {
       console.log('')

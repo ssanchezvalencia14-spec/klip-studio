@@ -206,10 +206,11 @@ Estados Unidos.</p>
 es el texto, no el audio ni el vídeo.</p>
 
 <h2>Cookies</h2>
-<p>Una sola, estrictamente necesaria: <code>klip_llave</code>, que mantiene la
-sesión tras introducir la clave de acceso. Es técnica, <code>HttpOnly</code>,
-<code>SameSite=Lax</code> y dura un año. No hay cookies de análisis, publicidad
-ni de terceros, por lo que no se solicita consentimiento.</p>
+<p>Una sola, estrictamente necesaria: <code>klip_sesion</code>, que mantiene la
+sesión tras entrar con correo y contraseña. Es técnica, <code>HttpOnly</code>,
+<code>Secure</code>, <code>SameSite=Lax</code> y dura 7 días, renovables mientras
+se use. No hay cookies de análisis, publicidad ni de terceros, por lo que no se
+solicita consentimiento.</p>
 
 <h2>Revocación, conservación y derechos</h2>
 <p>Cualquier cuenta de TikTok puede retirar el permiso desde <i>Ajustes y
@@ -257,10 +258,10 @@ panel typeface). Some process data in the United States.</p>
 text, not the audio or the video.</p>
 
 <h2>Cookies</h2>
-<p>One, strictly necessary: <code>klip_llave</code>, which keeps the session after
-the access key is entered. Technical, <code>HttpOnly</code>,
-<code>SameSite=Lax</code>, one year. No analytics, advertising or third-party
-cookies, so no consent banner is shown.</p>
+<p>One, strictly necessary: <code>klip_sesion</code>, which keeps the session after
+signing in with email and password. Technical, <code>HttpOnly</code>,
+<code>Secure</code>, <code>SameSite=Lax</code>, 7 days, renewed while in use. No
+analytics, advertising or third-party cookies, so no consent banner is shown.</p>
 
 <h2>Revocation, retention and rights</h2>
 <p>Any TikTok account can withdraw the grant under <i>Settings and privacy →

@@ -44,6 +44,12 @@ COPY src ./src
 COPY scripts ./scripts
 COPY db ./db
 
+# Detector de caras para el encuadre que sigue la cara (Fase 6): onnxruntime
+# en vendor/rostros y el modelo YuNet en /app/models. Si falla, la imagen
+# sigue valiendo: los clips salen con el encuadre clasico.
+ENV YUNET_MODEL_PATH=/app/models/face_detection_yunet_2023mar.onnx
+RUN npm run instalar-rostros || echo "AVISO: sin detector de caras, encuadre clasico"
+
 # Sin rutas absolutas: los binarios salen del PATH y los datos de /data.
 ENV WORK_DIR=/data/work \
     OUT_DIR=/data/out \

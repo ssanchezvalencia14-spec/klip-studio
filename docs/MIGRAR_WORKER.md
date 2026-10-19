@@ -20,6 +20,7 @@ pregunta a la base, nunca al revés.
 | Modelo `ggml-large-v3-turbo.bin` | Transcribir | Copiar la carpeta `models/` |
 | Claude Code **con sesión iniciada** | Buscar momentos con la suscripción | `claude` → `/login`, luego `npm run probar-ia` |
 | `.env` | Configuración | `npm run doctor` |
+| Detector de caras (opcional) | Encuadre que sigue la cara | `npm run instalar-rostros` |
 
 **Sin GPU NVIDIA no funciona el render tal como está**: usa `h264_nvenc`. Un VPS
 sin GPU puede descargar y transcribir (whisper también va por CPU, mucho más
@@ -29,6 +30,12 @@ lento), pero no armar los clips.
 basta con copiar el `.env`: hay que entrar una vez con `claude` y escribir
 `/login`. La sesión queda en la carpeta `~/.claude` de ese usuario. Ver
 `docs/IA.md`.
+
+**El detector de caras es opcional.** `npm run instalar-rostros` instala
+onnxruntime-node en `vendor/rostros` (unos 290 MB, fuera de `package.json`
+para que el panel de Hostinger no lo cargue) y descarga el modelo YuNet a
+`models/`. Sin él, los clips salen con el encuadre clásico (fondo borroso)
+y nada falla. `YUNET_MODEL_PATH` cambia dónde se busca el modelo.
 
 ---
 
@@ -53,7 +60,8 @@ instalar yt-dlp por winget, y solo uno trae whisper y NVENC.
 ## Pasos
 
 1. Instalar lo de la tabla de arriba.
-2. Clonar el repositorio y ejecutar `npm ci`.
+2. Clonar el repositorio y ejecutar `npm ci` (y `npm run instalar-rostros`
+   para el encuadre que sigue la cara).
 3. Copiar `.env` (sin rutas de Windows) y la carpeta `models/`.
 4. Iniciar sesión en Claude Code: `claude` → `/login`.
 5. Comprobar todo:

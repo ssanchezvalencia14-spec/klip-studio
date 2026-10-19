@@ -63,6 +63,24 @@ Hay que rotar igual:
 
 ---
 
+## Fase 6: lo que queda por probar o se hizo distinto
+
+- **Sin Python, como se decidió.** El plan pedía Demucs y librosa. En su lugar:
+  la voz de una canción se realza con filtros de ffmpeg antes de transcribir
+  (`src/ingest/audio.ts`, `FILTRO_VOZ`), y la energía, los drops y el
+  estribillo se calculan en Node (`src/select/musica.ts`). No separa la voz
+  como Demucs: con mezclas muy cargadas la letra sale peor, y entonces la
+  confianza baja y los clips salen sin subtítulos.
+- **Sin probar con video real.** Esta PC no tiene ffmpeg. El recorte que sigue
+  la cara (`sendcmd` + `crop`), el realce de voz y la energía sobre un
+  audio de verdad están cubiertos por `verify:fase6` con datos sintéticos y
+  la detección se probó con una foto, pero falta la prueba de aceptación: una
+  entrevista y un video musical de punta a punta en la PC del procesador.
+- **Quién habla se aproxima mirando la boca**, no el audio. Con dos personas
+  que gesticulan mucho puede equivocarse; la histéresis (1,5 s y 1,4 veces más
+  movimiento) evita que salte de una a otra.
+- **El panel remoto no sube MP4** (devuelve 501). Ya pasaba antes de la Fase 6.
+
 ## Contradicciones entre el plan y el proyecto
 
 La regla 8 del plan pide avisar en lugar de improvisar. Estas son las que

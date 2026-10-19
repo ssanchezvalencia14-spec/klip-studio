@@ -123,6 +123,8 @@ export async function publicarClips(db: Db, ownerId: string, sourceId: string): 
       caption: string
       hashtags: string[]
       score: number
+      titulo?: string
+      puntajes?: { gancho: number; cierre: number; retencion: number }
     }[]
   }
 
@@ -133,6 +135,25 @@ export async function publicarClips(db: Db, ownerId: string, sourceId: string): 
     log.warn(`clips.json de ${sourceId} ilegible; no se publica nada.`)
     return 0
   }
+
+  /*
+   * Las lineas de la transcripcion de cada clip, para editar los subtitulos
+   * desde el panel (Fase 6). El panel no ve el disco del PC, asi que se le
+   * mandan aqui, que es donde si estan.
+   */
+  let segmentos: { start: number; end: number; text: string }[] = []
+  const transcriptPath = join(paths.work, sourceId, 'transcript.json')
+  if (existsSync(transcriptPath)) {
+    try {
+      segmentos = readJson<Transcript>(transcriptPath).segments
+    } catch {
+      segmentos = []
+    }
+  }
+  const dentroDe = (a: number, b: number) =>
+    segmentos
+      .filter((x) => x.end > a && x.start < b)
+      .map((x) => ({ start: x.start, end: x.end, text: x.text.trim() }))
 
   const store = createStore(db, ownerId)
   const previos = new Map(
@@ -170,6 +191,10 @@ export async function publicarClips(db: Db, ownerId: string, sourceId: string): 
       proxyPath: previo?.proxyPath ?? '',
       proxyBytes: previo?.proxyBytes ?? 0,
       reviewedAt: previo?.reviewedAt ?? null,
+      // Un titulo editado en el panel no lo pisa la siguiente pasada.
+      titulo: previo?.titulo || clip.titulo || '',
+      puntajes: clip.puntajes ?? null,
+      segmentos: dentroDe(clip.start, clip.end),
     }
   })
 
@@ -258,6 +283,10 @@ export async function publicarResultado(
       const i = args.indexOf('--campana')
       const campanaId = i === -1 ? undefined : args[i + 1]
       await publicarFuente(db, ownerId, sourceId, campanaId)
+      // Video musical: se anota para el panel (aviso de derechos, estribillos).
+      if (args.includes('--musica')) {
+        await db.query(`update sources set tipo = 'musica' where owner_id = $1 and id = $2`, [ownerId, sourceId])
+      }
       log.info(`${sourceId} publicado en el panel`)
       return
     }

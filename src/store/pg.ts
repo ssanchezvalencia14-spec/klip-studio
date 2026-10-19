@@ -8,6 +8,7 @@ import type {
   MetricSnapshot,
   Post,
   QueueItem,
+  SegmentoClip,
 } from './store.js'
 
 /**
@@ -95,6 +96,11 @@ export interface Store {
       status: ClipStatus,
       patch?: { caption?: string; hashtags?: string[] },
     ): Promise<ClipRecord | undefined>
+    editar(
+      sourceId: string,
+      clipId: string,
+      cambios: { titulo?: string; subtitulos?: SegmentoClip[] | null },
+    ): Promise<ClipRecord | undefined>
     marcarCopia(
       sourceId: string,
       clipId: string,
@@ -136,7 +142,28 @@ function aClip(r: Record<string, unknown>): ClipRecord {
     proxyPath: (r.proxy_path as string | undefined) ?? '',
     proxyBytes: Number(r.proxy_bytes ?? 0),
     reviewedAt: r.reviewed_at === null ? null : new Date(r.reviewed_at as string).toISOString(),
+    titulo: (r.titulo as string | undefined) ?? '',
+    puntajes:
+      r.puntaje_gancho === null || r.puntaje_gancho === undefined
+        ? null
+        : {
+            gancho: Number(r.puntaje_gancho),
+            cierre: Number(r.puntaje_cierre ?? 0),
+            retencion: Number(r.puntaje_retencion ?? 0),
+          },
+    segmentos: leerSegmentos(r.segmentos) ?? [],
+    subtitulos: leerSegmentos(r.subtitulos),
   }
+}
+
+/** jsonb llega como objeto con postgres y como texto en algunos drivers. */
+function leerSegmentos(v: unknown): { start: number; end: number; text: string }[] | null {
+  if (v === null || v === undefined) return null
+  const lista = typeof v === 'string' ? (JSON.parse(v) as unknown) : v
+  if (!Array.isArray(lista)) return null
+  return lista
+    .filter((x): x is { start: unknown; end: unknown; text: unknown } => typeof x === 'object' && x !== null)
+    .map((x) => ({ start: Number(x.start), end: Number(x.end), text: String(x.text ?? '') }))
 }
 
 function aCuenta(r: Record<string, unknown>): Account {
@@ -285,19 +312,26 @@ export function createStore(db: Db, ownerId: string): Store {
           await db.query(
             `insert into clips (owner_id, source_id, clip_id, start_sec, end_sec, hook, reason,
                                 caption, hashtags, score, status, master_path, reviewed_at,
-                                proxy_path, proxy_bytes)
-             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                                proxy_path, proxy_bytes, titulo, puntaje_gancho, puntaje_cierre,
+                                puntaje_retencion, segmentos)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
              on conflict (owner_id, source_id, clip_id) do update set
                start_sec = excluded.start_sec, end_sec = excluded.end_sec,
                hook = excluded.hook, reason = excluded.reason,
                caption = excluded.caption, hashtags = excluded.hashtags,
                score = excluded.score, status = excluded.status,
                master_path = excluded.master_path, reviewed_at = excluded.reviewed_at,
-               proxy_path = excluded.proxy_path, proxy_bytes = excluded.proxy_bytes`,
+               proxy_path = excluded.proxy_path, proxy_bytes = excluded.proxy_bytes,
+               titulo = excluded.titulo,
+               puntaje_gancho = excluded.puntaje_gancho, puntaje_cierre = excluded.puntaje_cierre,
+               puntaje_retencion = excluded.puntaje_retencion,
+               segmentos = excluded.segmentos`,
             [
               ownerId, c.sourceId, c.clipId, c.start, c.end, c.hook, c.reason,
               c.caption, c.hashtags, c.score, c.status, c.masterPath, c.reviewedAt,
-              c.proxyPath, c.proxyBytes,
+              c.proxyPath, c.proxyBytes, c.titulo ?? '',
+              c.puntajes?.gancho ?? null, c.puntajes?.cierre ?? null, c.puntajes?.retencion ?? null,
+              JSON.stringify(c.segmentos ?? []),
             ],
           )
         }
@@ -337,6 +371,29 @@ export function createStore(db: Db, ownerId: string): Store {
        *
        * Aqui solo se tocan las dos columnas de la copia; lo demas no se mira.
        */
+      /*
+       * Lo que se edita desde Revisar (Fase 6): titulo y subtitulos.
+       *
+       * Sentencia propia, como setStatus: solo toca lo que viene. Los
+       * subtitulos se guardan aparte de los segmentos de la transcripcion, asi
+       * que "deshacer" es poner null y volver a los originales.
+       */
+      editar: async (sourceId, clipId, cambios) => {
+        const rows = await db.query(
+          `update clips set
+             titulo = coalesce($4, titulo),
+             subtitulos = case when $5::boolean then $6::jsonb else subtitulos end
+           where owner_id = $1 and source_id = $2 and clip_id = $3
+           returning *`,
+          [
+            ownerId, sourceId, clipId, cambios.titulo ?? null,
+            cambios.subtitulos !== undefined,
+            cambios.subtitulos === undefined || cambios.subtitulos === null ? null : JSON.stringify(cambios.subtitulos),
+          ],
+        )
+        return rows[0] === undefined ? undefined : aClip(rows[0])
+      },
+
       marcarCopia: async (sourceId, clipId, proxyPath, proxyBytes) => {
         await db.query(
           `update clips set proxy_path = $4, proxy_bytes = $5

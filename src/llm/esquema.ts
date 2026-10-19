@@ -100,7 +100,12 @@ Responde SOLO con un objeto JSON, sin texto antes ni despues y sin bloques de co
   }
 ]}
 
-Como maximo ${maximo} momentos. Una lista vacia es una respuesta valida.`
+Como maximo ${maximo} momentos. Una lista vacia es una respuesta valida.
+
+PREFERENCIAS:
+- Duracion ideal entre 20 y 60 segundos. Mas de 60 solo si el momento lo pide de verdad.
+- El clip NO empieza con una muletilla ("Si.", "Eh", "O sea", "Bueno", "Pues", "A ver"): mueve el inicio a la primera frase con contenido.
+- El titulo resume la idea con otras palabras; nunca copia la primera frase.`
 }
 
 /**

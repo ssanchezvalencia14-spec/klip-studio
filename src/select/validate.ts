@@ -134,7 +134,7 @@ export function validateCandidates(
       reason: clip.reason,
       caption: clip.caption,
       hashtags: clip.hashtags,
-      score: clip.score,
+      score: puntajeConMuletilla(clip.score, clip.hook),
       // Solo los trae el proveedor de la suscripcion (src/llm/seleccion.ts).
       ...('titulo' in clip && typeof clip.titulo === 'string' ? { titulo: clip.titulo } : {}),
       ...('puntajes' in clip && typeof clip.puntajes === 'object' && clip.puntajes !== null
@@ -146,6 +146,30 @@ export function validateCandidates(
   }
 
   return { accepted, rejected }
+}
+
+/*
+ * Muletillas al arrancar (Fase 6).
+ *
+ * Un clip que empieza con "Sí.", "Eh", "O sea" o "Bueno" pierde los primeros
+ * segundos, que son los que deciden si alguien se queda. No se descarta (el
+ * resto puede valer), pero baja en la lista: PENALIZACION_MULETILLA puntos.
+ */
+export const PENALIZACION_MULETILLA = 15
+const MULETILLA = /^\s*(?:s[ií]|no|eh+|em+|mm+|este|o sea|bueno|pues|a ver|mira|vale|ok(?:ay)?|aj[aá]|y nada|entonces)\b[\s.,!?…]*/i
+
+export function empiezaConMuletilla(texto: string): boolean {
+  const m = MULETILLA.exec(texto)
+  // "No" o "Sí" solo cuentan si van sueltos, seguidos de pausa: "No sé por qué"
+  // es una frase, "No. Mira..." es una muletilla.
+  if (m === null) return false
+  const palabra = (m[0] ?? '').trim().toLowerCase().replace(/[.,!?…]+$/, '')
+  if ((palabra === 'no' || palabra === 'si' || palabra === 'sí') && !/[.,!?…]/.test(m[0] ?? '')) return false
+  return true
+}
+
+export function puntajeConMuletilla(score: number, gancho: string): number {
+  return empiezaConMuletilla(gancho) ? Math.max(0, score - PENALIZACION_MULETILLA) : score
 }
 
 /** Fraccion solapada respecto al clip mas corto de los dos. */

@@ -109,6 +109,20 @@ export interface ClipRecord {
   /** Lo que ocupa esa copia. Para saber cuanto hay en la nube sin preguntarle. */
   proxyBytes: number
   reviewedAt: string | null
+  /** Titulo corto (Fase 6). Vacio si la IA no dio uno. */
+  titulo?: string
+  /** Desglose del puntaje (Fase 6). null si la seleccion no lo dio. */
+  puntajes?: { gancho: number; cierre: number; retencion: number } | null
+  /** Lineas de la transcripcion dentro del clip, en segundos del video largo. */
+  segmentos?: SegmentoClip[]
+  /** Subtitulos editados a mano. null o ausente = los de la transcripcion. */
+  subtitulos?: SegmentoClip[] | null
+}
+
+export interface SegmentoClip {
+  start: number
+  end: number
+  text: string
 }
 
 function clipKey(sourceId: string, clipId: string): string {

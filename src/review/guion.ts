@@ -442,9 +442,16 @@ async function refrescar() {
     state.overview = overview;
   }
   if (state.view === 'registro') {
-    const [runs, sistema] = await Promise.all([api('/api/runs'), api('/api/sistema')]);
+    const esAdmin = !state.yo || state.yo.rol === 'admin';
+    const [runs, sistema, auditoria] = await Promise.all([
+      api('/api/runs'),
+      api('/api/sistema'),
+      // Fase 8: el registro de cambios, solo para administradores.
+      esAdmin ? api('/api/auditoria').catch(() => null) : Promise.resolve(null),
+    ]);
     state.runs = runs;
     state.sistema = sistema;
+    state.auditoria = auditoria;
   }
   if (state.view === 'ia') {
     // Las tareas tambien: "Probar IA" es una tarea y hay que ver si sigue en marcha.
@@ -1398,6 +1405,21 @@ function pintarProcesador(d) {
  *
  * Los destinos se ponen en el .env del panel, no aqui: son claves.
  */
+/** Quien hizo que (Fase 8). Plegado: se consulta, no se mira a diario. */
+function pintarAuditoria(d) {
+  if (!d || !d.registro) return '';
+  return '<article class="card"><div class="body">' +
+    '<details class="nota"><summary>Registro de cambios: quién aprobó, publicó o cambió qué</summary>' +
+      (d.registro.length === 0
+        ? '<p class="reason">Todavía no hay nada anotado.</p>'
+        : '<ul class="lista-alertas">' + d.registro.map(r =>
+            '<li><b>' + esc(r.quien) + '</b> ' + esc(r.accion) + ' · ' + esc(hace(r.en)) +
+              (r.estado >= 400 ? ' · <span class="badge error">rechazado</span>' : '') +
+            '</li>').join('') + '</ul>') +
+    '</details>' +
+  '</div></article>';
+}
+
 function pintarAlertas(d) {
   if (!d || !d.alertas) return '';
   const a = d.alertas;
@@ -1852,6 +1874,18 @@ async function editarClip(card, cuerpo, aviso) {
 document.addEventListener('click', e => {
   const card = e.target.closest && e.target.closest('.detalle-clip');
   if (!card) return;
+  if (e.target.closest('[data-enlace-descarga]')) {
+    api('/api/clips/' + encodeURIComponent(card.dataset.source) + '/' + encodeURIComponent(card.dataset.clip) + '/enlace', { method: 'POST' })
+      .then(r => {
+        const enlace = location.origin + r.ruta;
+        const copiado = navigator.clipboard ? navigator.clipboard.writeText(enlace) : Promise.reject(new Error('sin portapapeles'));
+        return copiado
+          .then(() => avisar('Enlace copiado. Caduca en ' + r.horas + ' horas.'))
+          .catch(() => { prompt('Copia el enlace (caduca en ' + r.horas + ' horas):', enlace); });
+      })
+      .catch(err => avisar(err.message));
+    return;
+  }
   if (e.target.closest('[data-guardar-titulo]')) {
     const titulo = card.querySelector('.titulo-clip').value.trim();
     if (titulo.split(/\\s+/).filter(Boolean).length > 8) { avisar('El título admite como mucho 8 palabras.'); return; }
@@ -1933,6 +1967,10 @@ function detalleClip(c) {
         ' placeholder="Un título corto, distinto de la primera frase">' +
         '<button class="chip" data-guardar-titulo>Guardar</button></div>' +
       '<p class="reason titulo-aviso" style="margin:6px 0 0"></p>' +
+    '</div>' +
+    // Fase 8: un enlace para pasar el clip a quien no tiene acceso al panel.
+    '<div class="chips" style="margin-bottom:var(--s3)">' +
+      '<button class="chip" data-enlace-descarga>' + ico('enlace') + 'Copiar enlace de descarga</button>' +
     '</div>' +
     '<div class="field">' +
       '<label for="caption-' + esc(c.clipId) + '">Descripción del clip</label>' +
@@ -4109,7 +4147,7 @@ function render() {
   pintarEstadoMenu();
   if (state.view === 'clips') view.innerHTML = vistaClips();
   if (state.view === 'cola') view.innerHTML = vistaCola();
-  if (state.view === 'registro') view.innerHTML = pintarProcesador(state.sistema) + pintarAlertas(state.sistema) + vistaRegistro();
+  if (state.view === 'registro') view.innerHTML = pintarProcesador(state.sistema) + pintarAlertas(state.sistema) + pintarAuditoria(state.auditoria) + vistaRegistro();
   if (state.view === 'ia') view.innerHTML = vistaIA();
   if (state.view === 'usuarios') view.innerHTML = vistaUsuarios();
   if (state.view === 'flujo') view.innerHTML = vistaFlujo();
@@ -5471,7 +5509,7 @@ document.addEventListener('click', e => {
 
 /** La llave de un clip. El cero no aparece en ningun identificador. */
 function llaveClip(sourceId, clipId) {
-  return sourceId + '\u0000' + clipId;
+  return sourceId + '\\u0000' + clipId;
 }
 
 /** Las tarjetas de la rejilla, en el orden en que se ven. */
@@ -5562,7 +5600,7 @@ function porFila() {
 
 async function decidirLote(status) {
   const items = [...state.sel].map(k => {
-    const [sourceId, clipId] = k.split('\u0000');
+    const [sourceId, clipId] = k.split('\\u0000');
     return { sourceId, clipId };
   });
   if (items.length === 0) return;

@@ -43,7 +43,20 @@ import { crearNube, type Nube } from '../store/nube.js'
 import { PLATAFORMAS, repartirFranjas, type Plataforma } from '../store/store.js'
 import type { ClipRecord, ClipStatus, Post } from '../store/store.js'
 import { PLANES_UPLOAD_POST, describirTope, planDe } from '../publish/planes.js'
-import { renderPage } from './page.js'
+import { renderPage, SCRIPT_PANEL } from './page.js'
+import {
+  aplicarCabeceras,
+  anotarAuditoria,
+  claseDePeticion,
+  crearLimitador,
+  direccionDe,
+  DURACION_ENLACE_S,
+  firmarEnlace,
+  huellaScript,
+  leerAuditoria,
+  verificarEnlace,
+} from './seguridad.js'
+import { limpiarRutas } from '../lib/limpiar.js'
 import { renderPerdido } from './perdido.js'
 import { BadRequest, buildJob } from './pipeline.js'
 import { storeUpload, UploadError } from './upload.js'
@@ -127,7 +140,22 @@ function toView(clip: ClipRecord): ClipView {
   }
 }
 
+/** Fase 8: la huella del script del panel, para la politica de contenido. */
+const HUELLA_PANEL = huellaScript(SCRIPT_PANEL)
+const limitador = crearLimitador()
+
+/** Lo mas que se acepta en un cuerpo JSON. Los videos van por /api/upload. */
+const MAX_CUERPO = 2 * 1024 * 1024
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  /*
+   * Fase 8: ningun mensaje de error sale con rutas del disco ni claves.
+   * Muchos vienen de excepciones (error.message) y de la salida de las
+   * tareas; limpiarlos aqui cubre todos los caminos de una vez.
+   */
+  if (body !== null && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string') {
+    body = { ...(body as Record<string, unknown>), error: limpiarRutas((body as { error: string }).error) }
+  }
   const payload = JSON.stringify(body)
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -964,13 +992,27 @@ interface PlataformaEstado {
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
-  for await (const chunk of req) chunks.push(chunk as Buffer)
-  if (chunks.length === 0) return {}
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-  } catch {
-    return {}
+  let total = 0
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length
+    // Fase 8: un cuerpo enorme no se guarda entero en memoria.
+    if (total > MAX_CUERPO) {
+      ;(req as { cuerpo?: unknown }).cuerpo = {}
+      return {}
+    }
+    chunks.push(chunk as Buffer)
   }
+  let cuerpo: unknown = {}
+  if (chunks.length > 0) {
+    try {
+      cuerpo = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    } catch {
+      cuerpo = {}
+    }
+  }
+  // Para el registro de auditoria, que lo lee al terminar la peticion.
+  ;(req as { cuerpo?: unknown }).cuerpo = cuerpo
+  return cuerpo
 }
 
 /**
@@ -1042,10 +1084,32 @@ interface Contexto {
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
 
+  // --- Fase 8: cabeceras de seguridad y limite de peticiones ------------------
+  aplicarCabeceras(req, res, HUELLA_PANEL)
+  const clase = claseDePeticion(req.method ?? 'GET', url.pathname)
+  if (clase !== null) {
+    const espera = limitador.comprobar(direccionDe(req), clase)
+    if (espera !== null) {
+      res.setHeader('retry-after', String(espera))
+      sendJson(res, 429, { error: 'Demasiadas peticiones seguidas. Espera un momento y vuelve a intentarlo.' })
+      return
+    }
+  }
+
   // --- Quien entra -------------------------------------------------------------
   //
   // Publicas, sin sesion: el retorno de TikTok (lo protege su `state`), las
   // paginas legales (las lee quien audita la app) y la propia entrada.
+  /*
+   * Fase 8: descarga con enlace firmado. Sin sesion a proposito (se puede
+   * pasar a un cliente), pero solo con una firma buena y sin caducar.
+   */
+  const descarga = /^\/descarga\/([^/]+)\/([^/]+)$/.exec(url.pathname)
+  if (descarga !== null && req.method === 'GET') {
+    await servirDescarga(req, res, ctx, decodeURIComponent(descarga[1] ?? ''), decodeURIComponent(descarga[2] ?? ''), url)
+    return
+  }
+
   const publica = esRetornoDeTikTok(url) || esPaginaLegal(url)
   if (!publica && (await atenderAcceso(req, res, url, ctx.auth))) return
 
@@ -1078,6 +1142,20 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     if (!permitido(quien.rol, req.method ?? 'GET', url.pathname)) {
       negarPermiso(res)
       return
+    }
+
+    /*
+     * Fase 8: registro de auditoria de todo lo que cambia algo por la API.
+     * Se anota al terminar, con el codigo de la respuesta, para que conste
+     * tambien lo que se rechazo.
+     */
+    const metodo = req.method ?? 'GET'
+    if (url.pathname.startsWith('/api/') && metodo !== 'GET' && metodo !== 'HEAD') {
+      const actor = quien.usuario?.email ?? (quien.tipo === 'legado' ? 'llave antigua' : 'sin login (local)')
+      res.on('finish', () => {
+        void anotarAuditoria(ctx.db, ctx.ownerId, actor, metodo, url.pathname,
+          (req as { cuerpo?: unknown }).cuerpo ?? null, res.statusCode)
+      })
     }
   }
 
@@ -1356,6 +1434,23 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
    * volver a armar solo ese clip. El corte (inicio y fin) va por su camino de
    * siempre: la tarea render con --solo y --clip.
    */
+  /*
+   * Enlace de descarga de un clip (Fase 8): firmado y con caducidad. Se pide
+   * con POST para que quede en el registro de auditoria quien lo saco.
+   */
+  const pideEnlace = /^\/api\/clips\/([^/]+)\/([^/]+)\/enlace$/.exec(path)
+  if (pideEnlace !== null && req.method === 'POST') {
+    await readBody(req)
+    const sourceId = decodeURIComponent(pideEnlace[1] ?? '')
+    const clipId = decodeURIComponent(pideEnlace[2] ?? '')
+    if ((await store.clips.find(sourceId, clipId)) === undefined) {
+      sendJson(res, 404, { error: 'Ese clip ya no existe.' })
+      return
+    }
+    sendJson(res, 200, { ruta: firmarEnlace(sourceId, clipId), horas: DURACION_ENLACE_S / 3600 })
+    return
+  }
+
   const edicion = /^\/api\/clips\/([^/]+)\/([^/]+)\/editar$/.exec(path)
   if (edicion !== null && req.method === 'POST') {
     const sourceId = decodeURIComponent(edicion[1] ?? '')
@@ -1500,6 +1595,23 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
    * Los destinos no se configuran aqui: son claves (token de Telegram, clave
    * del correo) y viven en el .env. El panel solo dice si estan puestas.
    */
+  /*
+   * Registro de auditoria (Fase 8). Solo administradores: dice quien hizo
+   * que, y un operador no necesita ver lo que hacen los demas.
+   */
+  if (path === '/api/auditoria' && req.method === 'GET') {
+    if (quien !== null && quien.rol !== 'admin') {
+      sendJson(res, 403, { error: 'Solo un administrador puede ver el registro de cambios.' })
+      return
+    }
+    try {
+      sendJson(res, 200, { registro: await leerAuditoria(db, ownerId) })
+    } catch {
+      sendJson(res, 200, { registro: [] })
+    }
+    return
+  }
+
   if (path === '/api/sistema/alertas' && req.method === 'PUT') {
     const b = (await readBody(req)) as { activas?: unknown }
     await db.query(
@@ -2735,6 +2847,46 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     return
   }
   sendJson(res, 404, { error: 'Ruta desconocida' })
+}
+
+/** La descarga con enlace firmado: el MP4 como adjunto, o la nube firmada. */
+async function servirDescarga(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: Contexto,
+  sourceId: string,
+  clipId: string,
+  url: URL,
+): Promise<void> {
+  if (!verificarEnlace(sourceId, clipId, url.searchParams.get('exp') ?? '', url.searchParams.get('firma') ?? '')) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+    res.end('Este enlace de descarga no es válido o ha caducado. Pide uno nuevo en el panel.')
+    return
+  }
+  const clip = await ctx.store.clips.find(sourceId, clipId)
+  if (clip === undefined) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('Ese clip ya no existe.')
+    return
+  }
+  const nombre = `${sourceId}-${clipId}.mp4`.replace(/[^A-Za-z0-9._-]/g, '_')
+  if (!esRemoto() && clip.masterPath !== '' && existsSync(clip.masterPath)) {
+    res.setHeader('content-disposition', `attachment; filename="${nombre}"`)
+    streamVideo(req, res, clip)
+    return
+  }
+  if (clip.proxyPath !== '' && ctx.nube !== null) {
+    try {
+      const firmada = await ctx.nube.firmar(clip.proxyPath, 60)
+      res.writeHead(302, { location: firmada, 'cache-control': 'no-store' })
+      res.end()
+      return
+    } catch (error) {
+      log.error(`firmar descarga ${clip.proxyPath}: ${String(error)}`)
+    }
+  }
+  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+  res.end('El archivo de este clip no está disponible ahora mismo.')
 }
 
 /** Direcciones IPv4 de la maquina, para abrir el panel desde el movil. */

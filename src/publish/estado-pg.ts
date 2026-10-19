@@ -162,11 +162,12 @@ export function crearEstadoPg(db: Db, ownerId: string): EstadoWorker {
        * Reventar por clave duplicada convertiria una repeticion inofensiva en
        * una pasada fallida.
        */
-      await db.query(
+      const nuevas = await db.query(
         `insert into posts (id, owner_id, queue_item_id, source_id, clip_id, account_id,
                             external_id, provider, mode, published_at)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         on conflict (id) do nothing`,
+         on conflict (id) do nothing
+         returning id`,
         [
           row.id,
           ownerId,
@@ -180,6 +181,17 @@ export function crearEstadoPg(db: Db, ownerId: string): EstadoWorker {
           row.publishedAt,
         ],
       )
+      // Fase 8: la publicacion tambien queda en el registro de auditoria
+      // (una vez: un reintento que ya estaba anotado no se repite).
+      if (nuevas.length > 0) try {
+        await db.query(
+          `insert into auditoria (owner_id, quien, accion, ruta, detalle, estado)
+           values ($1, 'procesador', 'publicó un clip', '', $2, 200)`,
+          [ownerId, JSON.stringify({ video: row.sourceId, clip: row.clipId, cuenta: row.accountId, por: row.provider, modo: row.mode })],
+        )
+      } catch {
+        // Sin la migracion 025: publicar no depende del registro.
+      }
     },
 
     published: async (accountId, at) => {

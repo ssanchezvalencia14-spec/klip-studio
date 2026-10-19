@@ -15,6 +15,13 @@ import { GUION } from './guion.js'
 import { faviconK, marcaK } from './marca.js'
 import { icono } from './iconos.js'
 
+/**
+ * El script del panel tal cual va dentro de <script>. Exportado para que la
+ * politica de seguridad (src/review/seguridad.ts) calcule su huella sobre
+ * exactamente el mismo texto.
+ */
+export const SCRIPT_PANEL = '\n' + GUION + '\n'
+
 export function renderPage(): string {
   return `<!doctype html>
 <html lang="es">
@@ -113,9 +120,7 @@ ${CSS}
   </div>
 </div>
 
-<script>
-${GUION}
-</script>
+<script>${SCRIPT_PANEL}</script>
 </body>
 </html>`
 }

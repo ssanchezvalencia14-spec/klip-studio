@@ -22,7 +22,7 @@ export const CUBO = 'revision'
 export class NubeNoConfigurada extends Error {}
 
 export interface Nube {
-  subir(ruta: string, fichero: string): Promise<void>
+  subir(ruta: string, fichero: string, tipo?: string): Promise<void>
   firmar(ruta: string, segundos: number): Promise<string>
   borrar(rutas: string[]): Promise<void>
   asegurarCubo(): Promise<'creado' | 'ya estaba'>
@@ -77,7 +77,25 @@ export function crearNube(): Nube | null {
 
     async asegurarCubo() {
       const existe = await fetch(`${base}/bucket/${CUBO}`, { headers: cabeceras })
-      if (existe.ok) return 'ya estaba'
+      if (existe.ok) {
+        /*
+         * Un cubo creado antes de la Fase 5 solo admite MP4, y el fotograma de
+         * la vista previa es JPEG. Se actualiza; si falla, se sigue igual: sin
+         * fotograma la vista previa enseña el video.
+         */
+        await fetch(`${base}/bucket/${CUBO}`, {
+          method: 'PUT',
+          headers: { ...cabeceras, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            id: CUBO,
+            name: CUBO,
+            public: false,
+            file_size_limit: 25 * 1024 * 1024,
+            allowed_mime_types: ['video/mp4', 'image/jpeg'],
+          }),
+        }).catch(() => undefined)
+        return 'ya estaba'
+      }
 
       /*
        * Un cubo que no existe responde 400, no 404.
@@ -106,14 +124,15 @@ export function crearNube(): Nube | null {
           // adivinara la ruta, y la ruta es el id del clip.
           public: false,
           file_size_limit: 25 * 1024 * 1024,
-          allowed_mime_types: ['video/mp4'],
+          // JPEG para el fotograma limpio de la vista previa (Fase 5).
+          allowed_mime_types: ['video/mp4', 'image/jpeg'],
         }),
       })
       if (!res.ok) await fallo(res, 'Crear el cubo')
       return 'creado'
     },
 
-    async subir(ruta, fichero) {
+    async subir(ruta, fichero, tipo = 'video/mp4') {
       const datos = await readFile(fichero)
       // POST con x-upsert en vez de PUT: PUT falla con 404 si el objeto no
       // existe todavia, asi que reintentar una subida a medias requeriria
@@ -122,7 +141,7 @@ export function crearNube(): Nube | null {
         method: 'POST',
         headers: {
           ...cabeceras,
-          'content-type': 'video/mp4',
+          'content-type': tipo,
           'cache-control': 'max-age=3600',
           'x-upsert': 'true',
         },

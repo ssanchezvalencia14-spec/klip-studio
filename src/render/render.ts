@@ -36,7 +36,12 @@ export interface RenderClip {
  * El seguimiento de cara daria un encuadre mejor, pero multiplica la
  * complejidad y no se aborda hasta saber si los clips convierten.
  */
-function buildFilterGraph(assPath: string | null, blurSigma: number): string {
+/** Donde va el fotograma limpio de un clip: al lado del MP4, en .jpg. */
+export function rutaFotograma(clipMp4: string): string {
+  return clipMp4.replace(/\.mp4$/i, '') + '.fotograma.jpg'
+}
+
+export function buildFilterGraph(assPath: string | null, blurSigma: number): string {
   // Sin subtitulos, la salida del overlay YA ES la final. Dejarla como [v1] y
   // no encadenar nada mas dejaria el filtergraph sin [vout] y ffmpeg fallaria
   // al mapear, asi que el nombre de la ultima etiqueta depende de si hay
@@ -257,6 +262,37 @@ export async function renderClip(
   ])
 
   const validated = await validateAgainstTikTok(target)
+
+  /*
+   * Un fotograma limpio, sin subtitulos ni rotulo (Fase 5).
+   *
+   * La vista previa de Estilo pinta encima los subtitulos con los ajustes del
+   * momento. Sobre el clip ya armado saldrian dos veces (los quemados y los de
+   * la vista previa), y sin nada salia un rectangulo negro. Este fotograma es
+   * el encuadre real del video, a 540x960. Si falla no pasa nada: el clip ya
+   * esta hecho.
+   */
+  try {
+    await ffmpeg([
+      '-y',
+      '-ss',
+      (clip.start + Math.min(1.5, duration / 2)).toFixed(3),
+      '-i',
+      sourceVideo,
+      '-filter_complex',
+      buildFilterGraph(null, blurSigma) + ';[vout]scale=540:960[foto]',
+      '-map',
+      '[foto]',
+      '-frames:v',
+      '1',
+      '-q:v',
+      '4',
+      rutaFotograma(target),
+    ])
+  } catch (error) {
+    log.warn(`No se pudo sacar el fotograma del clip ${index}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`)
+  }
+
   const elapsedMs = performance.now() - startedAt
 
   log.info(

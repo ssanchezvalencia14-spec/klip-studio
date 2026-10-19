@@ -21,6 +21,7 @@ import { crearCopia } from '../src/render/copia.js'
 import { connect } from '../src/store/db.js'
 import { crearNube, rutaClip } from '../src/store/nube.js'
 import { createStore } from '../src/store/pg.js'
+import { rutaFotograma } from '../src/render/render.js'
 
 async function main(): Promise<void> {
   loadEnv()
@@ -116,6 +117,13 @@ async function main(): Promise<void> {
         const copia = await crearCopia(clip.masterPath, sourceId, clip.clipId)
         const ruta = rutaClip(OWNER_ID, sourceId, clip.clipId)
         await nube.subir(ruta, copia.path)
+        // El fotograma limpio para la vista previa de Estilo, si el render lo
+        // dejo. No es imprescindible: sin el, la vista previa enseña el video.
+        const foto = rutaFotograma(clip.masterPath)
+        if (existsSync(foto)) {
+          await nube.subir(ruta.replace(/\.mp4$/i, '.jpg'), foto, 'image/jpeg').catch((e: unknown) =>
+            console.warn(`${etiqueta}  sin fotograma: ${e instanceof Error ? e.message : String(e)}`))
+        }
 
         /*
          * Se anota DESPUES de que la subida vuelva bien.

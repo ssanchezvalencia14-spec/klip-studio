@@ -9,6 +9,7 @@
   },
   "scripts": {
     "doctor": "tsx scripts/doctor.ts",
+    "check-health": "tsx scripts/check-health.ts",
     "ingest": "tsx scripts/ingest.ts",
     "select": "tsx scripts/select.ts",
     "typecheck": "tsc --noEmit",

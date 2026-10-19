@@ -215,6 +215,45 @@ const riesgos = readFileSync(join(ROOT, 'docs', 'RIESGOS.md'), 'utf8')
 check('docs/RIESGOS.md explica normas de TikTok, tope de repeticiones y licencias', /normas/i.test(riesgos) && /repeticiones/i.test(riesgos) && /licencia/i.test(riesgos))
 check('Videos: aviso de permiso o licencia al añadir un video', GUION.includes('Usa solo videos tuyos o con permiso de su autor'))
 
+// --- 6. Shorts y Reels por upload-post --------------------------------------------------------
+
+const { UploadPostProvider, tituloCorto } = await import('../src/publish/providers/uploadPost.js')
+const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+const { tmpdir } = await import('node:os')
+const tmp = mkdtempSync(join(tmpdir(), 'klip-f7-'))
+const mp4 = join(tmp, 'c.mp4')
+writeFileSync(mp4, Buffer.alloc(1024))
+let formulario: FormData | null = null
+let respuesta: Record<string, { success: boolean; error?: string }> = { tiktok: { success: true }, youtube: { success: true }, instagram: { success: false, error: 'not connected' } }
+const fetchOriginal = globalThis.fetch
+globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+  formulario = init?.body as FormData
+  return new Response(JSON.stringify({ request_id: 'r1', results: respuesta }), { status: 200 })
+}) as typeof fetch
+const up = new UploadPostProvider('clave-falsa')
+const r1 = await up.publish({
+  accountId: 'acc-03', videoPath: mp4, caption: 'Lo que nadie te cuenta #emprender', hashtags: ['emprender'],
+  mode: 'direct', texto: 'Lo que nadie te cuenta #emprender', plataformas: ['youtube', 'instagram'],
+})
+const fd = formulario as FormData | null
+check(
+  'Shorts y Reels: van en la misma petición que TikTok',
+  fd !== null && fd.getAll('platform[]').join(',') === 'tiktok,youtube,instagram' &&
+    fd.get('media_type') === 'REELS' && fd.get('youtube_title') === 'Lo que nadie te cuenta',
+  fd === null ? 'sin peticion' : JSON.stringify(fd.getAll('platform[]')),
+)
+check('Shorts y Reels: si TikTok sale, un fallo de Instagram no repite la publicación', r1.ok === true)
+respuesta = { tiktok: { success: false, error: 'spam_risk_too_many_pending_share' }, youtube: { success: true }, instagram: { success: true } }
+const r2 = await up.publish({ accountId: 'acc-03', videoPath: mp4, caption: 'x', hashtags: [], mode: 'direct', plataformas: ['youtube'] })
+check('Shorts y Reels: si TikTok falla, la entrega cuenta como fallida', r2.ok === false)
+await up.publish({ accountId: 'acc-01', videoPath: mp4, caption: 'x', hashtags: [], mode: 'direct' })
+check('Sin plataformas marcadas, solo TikTok (como antes)', (formulario as FormData | null)?.getAll('platform[]').join(',') === 'tiktok')
+globalThis.fetch = fetchOriginal
+rmSync(tmp, { recursive: true, force: true })
+check('Título de YouTube: sin hashtags y como mucho 100 caracteres', tituloCorto('palabra '.repeat(30) + '#tag').length <= 100 && !tituloCorto('hola #tag').includes('#'))
+check('Cuentas: Shorts y Reels se marcan por cuenta en Editar', GUION.includes("caja('youtube', 'YouTube Shorts'") && GUION.includes("caja('instagram', 'Instagram Reels'"))
+check('Plan: avisa si se paga más de lo que se usa', GUION.includes('function revisionPlan(') && GUION.includes('Pagas el plan'))
+
 await pg.close()
 
 for (const c of checks) {

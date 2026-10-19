@@ -736,7 +736,7 @@ async function buildOverview(
     // /api/plataformas; aqui solo cabe la cifra.
     // `cuentas` ya son las publicables, o sea las que pueden recibir video
     // con el proveedor activo. Esa es la nocion de "conectada" que importa.
-    plataformas: resumirPlataformas(posts, cuentas.length, cuentas.length),
+    plataformas: resumirPlataformas(posts, cuentas.length, cuentas.length, { proveedor: proveedorActivo(), cuentas }),
     // Copias de revision subidas, por VOD, y lo que ocupan en total.
     subidos,
     nubeBytes,
@@ -839,6 +839,7 @@ function resumirPlataformas(
   posts: Post[],
   cuentas: number,
   enlazadas: number,
+  extras: { proveedor: string; cuentas: { plataformas?: string[] }[] } = { proveedor: proveedorActivo(), cuentas: [] },
 ): PlataformaEstado[] {
   /*
    * Los dos proveedores cuentan.
@@ -881,27 +882,43 @@ function resumirPlataformas(
               'empezaran a salir solos.'
             : null,
     },
-    {
-      id: 'youtube',
-      nombre: 'YouTube Shorts',
-      estado: 'no-disponible',
-      cuentas: 0,
-      publicaciones: 0,
-      ultima: null,
-      via: null,
-      nota: 'Todavía no está hecho. El reparto y el render ya valen tal cual; falta quien lo suba.',
-    },
-    {
-      id: 'instagram',
-      nombre: 'Instagram Reels',
-      estado: 'no-disponible',
-      cuentas: 0,
-      publicaciones: 0,
-      ultima: null,
-      via: null,
-      nota: 'Todavía no está hecho. El reparto y el render ya valen tal cual; falta quien lo suba.',
-    },
+    plataformaExtra('youtube', 'YouTube Shorts', extras),
+    plataformaExtra('instagram', 'Instagram Reels', extras),
   ]
+}
+
+/**
+ * Shorts y Reels (Fase 7).
+ *
+ * Solo upload-post sabe publicarlos: con la API directa de TikTok siguen en
+ * "Proximamente". Con upload-post se cuentan las cuentas que los tienen
+ * marcados en Cuentas > Editar.
+ */
+function plataformaExtra(
+  id: 'youtube' | 'instagram',
+  nombre: string,
+  extras: { proveedor: string; cuentas: { plataformas?: string[] }[] },
+): PlataformaEstado {
+  if (extras.proveedor !== 'upload-post') {
+    return {
+      id, nombre, estado: 'no-disponible', cuentas: 0, publicaciones: 0, ultima: null, via: null,
+      nota: 'Próximamente: solo se puede publicar en ' + nombre + ' a través de upload-post.',
+    }
+  }
+  const n = extras.cuentas.filter((c) => (c.plataformas ?? []).includes(id)).length
+  return {
+    id,
+    nombre,
+    estado: n > 0 ? 'conectado' : 'sin-conectar',
+    cuentas: n,
+    publicaciones: 0,
+    ultima: null,
+    via: 'upload-post',
+    nota:
+      n > 0
+        ? null
+        : 'Conecta ' + nombre + ' en el perfil de upload-post de cada cuenta y márcalo en Cuentas › Editar.',
+  }
 }
 
 /**
@@ -2083,7 +2100,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     // El proveedor viaja con los datos: la lista de cuentas dice cosas distintas
     // segun por donde se publique, y sin esto el navegador tendria que adivinarlo.
     sendJson(res, 200, {
-      plataformas: resumirPlataformas(posts, cuentas.length, cuentas.length),
+      plataformas: resumirPlataformas(posts, cuentas.length, cuentas.length, { proveedor: proveedorActivo(), cuentas }),
       proveedor: proveedorActivo(),
     })
     return

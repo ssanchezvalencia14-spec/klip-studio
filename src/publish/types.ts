@@ -44,6 +44,12 @@ export interface PublishRequest {
   texto?: string
   /** Quien puede verlo. Solo cuenta en publicacion directa. */
   privacidad?: string
+  /**
+   * Fase 7: ademas de TikTok, YouTube Shorts y/o Instagram Reels. Solo lo
+   * entiende upload-post, que publica en todas con una peticion. Sin esto,
+   * solo TikTok.
+   */
+  plataformas?: string[]
 }
 
 export interface PublishSuccess {

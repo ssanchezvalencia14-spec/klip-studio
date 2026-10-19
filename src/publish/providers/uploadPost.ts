@@ -58,8 +58,23 @@ export class UploadPostProvider implements PublishProvider {
 
     const form = new FormData()
     form.append('user', accountId)
-    form.append('platform[]', 'tiktok')
+    /*
+     * Fase 7: Shorts y Reels por la misma peticion. upload-post publica en
+     * cada plataforma conectada al perfil; TikTok va siempre y es la que
+     * decide si la entrega cuenta como hecha (ver leerResultado).
+     *
+     * SIN PROBAR contra la API real: los nombres de campo salen de la
+     * documentacion de upload-post. Ver docs/DEUDA.md.
+     */
+    const plataformas = [...new Set(['tiktok', ...(request.plataformas ?? [])])]
+    for (const p of plataformas) form.append('platform[]', p)
     form.append('title', title)
+    if (plataformas.includes('youtube')) {
+      // YouTube pide titulo corto aparte; el texto entero va a la descripcion.
+      form.append('youtube_title', tituloCorto(caption || title))
+      form.append('youtube_description', title)
+    }
+    if (plataformas.includes('instagram')) form.append('media_type', 'REELS')
     // MEDIA_UPLOAD deja el video en borradores; DIRECT_POST publica en el perfil.
     form.append('post_mode', mode === 'draft' ? 'MEDIA_UPLOAD' : 'DIRECT_POST')
 
@@ -124,7 +139,7 @@ export class UploadPostProvider implements PublishProvider {
 
     const bodyText = await response.text()
 
-    if (response.ok) return leerResultado(bodyText, mode)
+    if (response.ok) return leerResultado(bodyText, mode, plataformas)
 
     return classifyFailure(response, bodyText)
   }
@@ -146,7 +161,16 @@ export class UploadPostProvider implements PublishProvider {
  * a intentarlo. Es el mismo fallo que ya costo caro con la API de TikTok, donde
  * el worker cantaba "subido" en cuanto terminaban de viajar los bytes.
  */
-function leerResultado(bodyText: string, mode: PublishRequest['mode']): PublishResult {
+/** Titulo para YouTube: sin hashtags y como mucho 100 caracteres, por palabras. */
+export function tituloCorto(texto: string): string {
+  const limpio = texto.replace(/#[\p{L}\p{N}_]+/gu, '').replace(/\s+/g, ' ').trim()
+  if (limpio.length <= 100) return limpio
+  const corte = limpio.slice(0, 100)
+  const espacio = corte.lastIndexOf(' ')
+  return (espacio > 40 ? corte.slice(0, espacio) : corte).trim()
+}
+
+function leerResultado(bodyText: string, mode: PublishRequest['mode'], plataformas: string[] = ['tiktok']): PublishResult {
   let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(bodyText) as Record<string, unknown>
@@ -182,6 +206,18 @@ function leerResultado(bodyText: string, mode: PublishRequest['mode']): PublishR
       return { ok: false, kind: 'transient', message: `Fallo sin detalle: ${bodyText.slice(0, 200)}` }
     }
     return { ok: true, externalId, mode }
+  }
+
+  /*
+   * Shorts y Reels no deciden la entrega: si TikTok salio, la publicacion
+   * cuenta como hecha y lo de las demas se apunta en el registro. Reintentar
+   * todo por un fallo de Instagram volveria a subir a TikTok.
+   */
+  for (const otra of plataformas.filter((p) => p !== 'tiktok')) {
+    const r = (results as Record<string, unknown> | undefined)?.[otra] as Record<string, unknown> | undefined
+    if (r !== undefined && r['success'] !== true) {
+      log.warn(`${otra}: no se publico (${String(r['error'] ?? 'sin detalle').slice(0, 160)})`)
+    }
   }
 
   if (porPlataforma['success'] === true) return { ok: true, externalId, mode }

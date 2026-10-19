@@ -3656,7 +3656,29 @@ function medidorCuentas() {
     (conTope && tope - total > 0
       ? '<p class="reason" style="margin:var(--s2) 0 0">Tu plan admite ' + plural(tope - total, 'cuenta más', 'cuentas más') + '.</p>'
       : '') +
+    revisionPlan(activas, tope) +
   '</div></article>';
+}
+
+/**
+ * Revision del plan (Fase 7): cuantas cuentas publican de verdad frente a las
+ * que se pagan, y si un plan mas barato bastaria.
+ *
+ * "Publican" son las activas: con upload-post no hay forma de saber desde
+ * aqui si el perfil existe al otro lado, y las pausadas no reciben nada.
+ * Solo se sugiere bajar si sobra al menos la mitad del cupo: con un margen
+ * pequeño cambiar de plan por unos dolares no compensa.
+ */
+function revisionPlan(activas, tope) {
+  const planes = state.settings?.planes ?? [];
+  const actual = planes.find(p => p.perfiles === tope);
+  if (!actual || activas === 0) return '';
+  const basta = planes.filter(p => p.perfiles >= activas && !p.aviso).sort((x, y) => x.usd - y.usd)[0];
+  if (!basta || basta.usd >= actual.usd || activas > tope / 2) return '';
+  return '<p class="warn" style="margin:var(--s3) 0 0">Pagas el plan <b>' + esc(actual.nombre) + '</b> (' +
+    actual.perfiles + ' cuentas, ' + actual.usd + ' USD al mes) y publican ' + activas + '. ' +
+    'Con <b>' + esc(basta.nombre) + '</b> (' + basta.perfiles + ' cuentas) pagarías ' + basta.usd +
+    ' USD al mes. Si cambias de plan en upload-post, elígelo también en Horarios.</p>';
 }
 
 function vistaPlataformas() {
@@ -3679,7 +3701,7 @@ function vistaPlataformas() {
         ? '<div class="stats" style="margin-top:var(--s3)">' +
             '<div><b>' + p.cuentas + '</b><span>Cuentas</span></div>' +
             '<div><b>' + p.publicaciones + '</b><span>Subidos</span></div>' +
-            '<div><b>' + hora(p.ultima) + '</b><span>Ultimo</span></div>' +
+            '<div><b>' + hora(p.ultima) + '</b><span>Último</span></div>' +
           '</div>'
         : '') +
 

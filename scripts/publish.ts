@@ -168,9 +168,12 @@ async function main(): Promise<void> {
    * en publish/types.ts, asi que cambiar cualquiera de las dos cosas era tocar
    * codigo y volver a desplegar.
    */
+  // Fase 7: Shorts y Reels de cada cuenta, marcados en Cuentas > Editar.
+  const plataformas = new Map((await store.accounts.all()).map((a) => [a.id, a.plataformas ?? ['tiktok']]))
   const report = await runWorker({
     provider,
     mode,
+    plataformasDe: (id) => plataformas.get(id),
     persist: live,
     estado,
     texto: {

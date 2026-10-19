@@ -188,6 +188,8 @@ export interface WorkerOptions {
    * codigo. Es opcional para no romper las llamadas sueltas de las pruebas.
    */
   texto?: { plantilla: string; fijos: string; privacidad: string }
+  /** Fase 7: a que plataformas publica cada cuenta (Shorts, Reels). */
+  plataformasDe?: (accountId: string) => string[] | undefined
   /** Cadencia por cuenta. Sin esto, los topes de TIKTOK_LIMITS. */
   cadencia?: { porMinuto: number; porDia: number }
   /**
@@ -281,6 +283,12 @@ export async function runWorker(options: WorkerOptions): Promise<WorkerReport> {
 
   // Envoltorios de escritura. Con persist=false el worker se comporta igual
   // pero no toca el estado.
+  /** Las plataformas de la cuenta, solo si las hay (exactOptionalPropertyTypes). */
+  const plataformasDe = (id: string): { plataformas?: string[] } => {
+    const p = options.plataformasDe?.(id)
+    return p === undefined ? {} : { plataformas: p }
+  }
+
   const estado = options.estado ?? estadoEnFicheros
   const write: WriteSet = {
     tomar: async (id) => (persist ? estado.tomar(id) : true),
@@ -459,6 +467,7 @@ export async function runWorker(options: WorkerOptions): Promise<WorkerReport> {
       caption: item.caption,
       hashtags: item.hashtags,
       mode: options.mode,
+      ...plataformasDe(item.accountId),
       ...(options.texto === undefined
         ? {}
         : {

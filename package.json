@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "test": "tsx scripts/verify-todo.ts",
     "doctor": "tsx scripts/doctor.ts",
     "check-health": "tsx scripts/check-health.ts",
     "probar-ia": "tsx scripts/probar-ia.ts",
@@ -18,6 +19,8 @@
     "verify:fase5": "tsx scripts/verify-fase5.ts",
     "verify:fase6": "tsx scripts/verify-fase6.ts",
     "verify:fase7": "tsx scripts/verify-fase7.ts",
+    "verify:fase8": "tsx scripts/verify-fase8.ts",
+    "verify:e2e": "tsx scripts/verify-e2e.ts",
     "ingest": "tsx scripts/ingest.ts",
     "select": "tsx scripts/select.ts",
     "typecheck": "tsc --noEmit",

@@ -140,6 +140,16 @@ function toView(clip: ClipRecord): ClipView {
   }
 }
 
+/**
+ * Fase 8: una tarea tal como la ve el navegador. Los argumentos pueden llevar
+ * la ruta completa de un MP4 subido (C:Users...), que no debe salir del
+ * servidor: se recorta igual que la salida de las tareas.
+ */
+function jobParaPanel<T extends { args: string[] } | null | undefined>(job: T): T {
+  if (job === null || job === undefined) return job
+  return { ...job, args: job.args.map((a) => limpiarRutas(a)) }
+}
+
 /** Fase 8: la huella del script del panel, para la politica de contenido. */
 const HUELLA_PANEL = huellaScript(SCRIPT_PANEL)
 const limitador = crearLimitador()
@@ -348,7 +358,7 @@ function vigilarTareas(cola: ReturnType<typeof createCola>): () => void {
       // Sin el registro completo: son cientos de kilobytes y el panel solo
       // enseña la ultima linea hasta que alguien abre los detalles.
       const { log: _log, ...resto } = job
-      emitir('job', resto)
+      emitir('job', jobParaPanel(resto))
     }
   }
 
@@ -734,7 +744,7 @@ async function buildOverview(
       acc[q.sourceId] = (acc[q.sourceId] ?? 0) + 1
       return acc
     }, {}),
-    activeJob: enMarcha(jobs),
+    activeJob: jobParaPanel(enMarcha(jobs)),
     // Si el ordenador que procesa esta escuchando. Viaja siempre para que el
     // panel pueda avisar ANTES de que alguien pegue un enlace, no despues.
     trabajador: await cola.trabajadorVivo(),
@@ -1026,7 +1036,7 @@ function streamVideo(req: IncomingMessage, res: ServerResponse, clip: ClipRecord
   const path = clip.masterPath
 
   if (path === '' || !existsSync(path)) {
-    sendJson(res, 404, { error: 'El archivo del clip no existe' })
+    sendJson(res, 404, { error: 'El archivo de este clip no está en este ordenador. Vuelve a armarlo.' })
     return
   }
 
@@ -1372,7 +1382,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     }
 
     if (body.status !== 'approved' && body.status !== 'rejected' && body.status !== 'pending') {
-      sendJson(res, 400, { error: 'status debe ser approved, rejected o pending' })
+      sendJson(res, 400, { error: 'Elige aprobar, descartar o devolver a revisar.' })
       return
     }
     const items = Array.isArray(body.items) ? body.items : []
@@ -1492,7 +1502,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       ...(subtitulos === undefined ? {} : { subtitulos }),
     })
     if (editado === undefined) {
-      sendJson(res, 404, { error: 'Clip no encontrado' })
+      sendJson(res, 404, { error: 'Ese clip ya no existe.' })
       return
     }
 
@@ -1525,7 +1535,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     }
 
     if (body.status !== 'approved' && body.status !== 'rejected' && body.status !== 'pending') {
-      sendJson(res, 400, { error: 'status debe ser approved, rejected o pending' })
+      sendJson(res, 400, { error: 'Elige aprobar, descartar o devolver a revisar.' })
       return
     }
 
@@ -1535,7 +1545,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     })
 
     if (updated === undefined) {
-      sendJson(res, 404, { error: 'Clip no encontrado' })
+      sendJson(res, 404, { error: 'Ese clip ya no existe.' })
       return
     }
 
@@ -1761,7 +1771,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       const args = [...(esUuid ? [stored.path, '--campana', campana] : [stored.path]), ...musica]
       const job = await cola.encolar('ingest', args, `Transcribir ${stored.name}`)
       avisarCambio('trabajos')
-      sendJson(res, 202, { job, upload: stored })
+      // Sin la ruta del disco: el navegador solo necesita el nombre.
+      sendJson(res, 202, { job: jobParaPanel(job), upload: { name: stored.name, bytes: stored.bytes } })
     } catch (error) {
       if (error instanceof UploadError) {
         sendJson(res, 400, { error: error.message })
@@ -2269,7 +2280,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
             await proyectos.asignarVod(id, destino === '' ? null : destino)
             break
           default:
-            sendJson(res, 400, { error: `Accion desconocida: ${String(body.accion)}` })
+            sendJson(res, 400, { error: 'Esa acción no existe.' })
             return
         }
       }
@@ -2571,12 +2582,16 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
           maxDurationSec: info.maxDurationSec,
         })
       } catch (error) {
-        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+        // El detalle de TikTok va al registro; en pantalla, lo que hay que hacer.
+        log.warn(`Comprobar ${accountId}: ${limpiarRutas(error instanceof Error ? error.message : String(error))}`)
+        sendJson(res, 400, {
+          error: 'TikTok no respondió por esta cuenta. Si vuelve a pasar, desenlázala y vuelve a enlazarla.',
+        })
       }
       return
     }
 
-    sendJson(res, 400, { error: `Accion desconocida: ${String(body.accion)}` })
+    sendJson(res, 400, { error: 'Esa acción no existe.' })
     return
   }
 
@@ -2633,7 +2648,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     sendJson(res, 200, {
       active: enMarcha(jobs)?.id ?? null,
       jobs: jobs.map(({ log: texto, ...rest }) => ({
-        ...rest,
+        ...jobParaPanel(rest),
         lineCount: texto === '' ? 0 : texto.split('\n').length,
       })),
     })
@@ -2707,7 +2722,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
   if (jobDetail !== null && req.method === 'GET') {
     const job = await cola.porId(jobDetail[1] ?? '')
     if (job === null) {
-      sendJson(res, 404, { error: 'Trabajo no encontrado' })
+      sendJson(res, 404, { error: 'Esa tarea ya no existe.' })
       return
     }
     // El panel espera un array de lineas. En la base el registro es un solo
@@ -2720,7 +2735,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
   if (jobCancel !== null && req.method === 'POST') {
     const ok = await cola.cancelar(jobCancel[1] ?? '')
     if (ok) avisarCambio('trabajos')
-    sendJson(res, ok ? 200 : 409, ok ? { ok: true } : { error: 'No se pudo cancelar' })
+    sendJson(res, ok ? 200 : 409, ok ? { ok: true } : { error: 'No se pudo cancelar la tarea: puede que ya haya terminado.' })
     return
   }
 
@@ -2739,7 +2754,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
   if (foto !== null && req.method === 'GET') {
     const clip = await store.clips.find(decodeURIComponent(foto[1] ?? ''), decodeURIComponent(foto[2] ?? ''))
     if (clip === undefined) {
-      sendJson(res, 404, { error: 'Clip no encontrado' })
+      sendJson(res, 404, { error: 'Ese clip ya no existe.' })
       return
     }
     const local = clip.masterPath === '' ? '' : rutaFotograma(clip.masterPath)
@@ -2770,7 +2785,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
       decodeURIComponent(video[2] ?? ''),
     )
     if (clip === undefined) {
-      sendJson(res, 404, { error: 'Clip no encontrado' })
+      sendJson(res, 404, { error: 'Ese clip ya no existe.' })
       return
     }
 
@@ -2846,7 +2861,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     res.end(html)
     return
   }
-  sendJson(res, 404, { error: 'Ruta desconocida' })
+  sendJson(res, 404, { error: 'Esa dirección no existe en el panel.' })
 }
 
 /** La descarga con enlace firmado: el MP4 como adjunto, o la nube firmada. */
@@ -2949,7 +2964,7 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
   const server = createServer((req, res) => {
     handle(req, res, ctx).catch((error: unknown) => {
       log.error('Fallo al atender la peticion', error)
-      if (!res.headersSent) sendJson(res, 500, { error: 'Error interno' })
+      if (!res.headersSent) sendJson(res, 500, { error: 'Algo falló en el panel. Vuelve a intentarlo en un momento.' })
     })
   })
 

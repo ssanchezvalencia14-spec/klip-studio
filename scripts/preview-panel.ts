@@ -8,7 +8,8 @@
  * de que haya un VOD a medias: la revision visual necesita ver las seis
  * pantallas con contenido, y produccion no siempre tiene de todo.
  *
- * Sin llave: es 127.0.0.1 y muere al cerrar la consola.
+ * Sin login (KLIP_SIN_LOGIN=1): escucha solo en 127.0.0.1 y muere al cerrar
+ * la consola.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -22,6 +23,8 @@ process.env.AUTO_CHAIN = '0'
 process.env.PANEL_REMOTO = '1'
 delete process.env.REVIEW_PASSWORD
 delete process.env.REVIEW_KEY
+// Vista previa sin login: el servidor escucha solo en 127.0.0.1.
+process.env.KLIP_SIN_LOGIN = '1'
 
 const pg = new PGlite()
 const db: Db = {

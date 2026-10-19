@@ -35,6 +35,9 @@ loadEnv()
 process.env.AUTO_CHAIN = '0'
 process.env.PANEL_REMOTO = '1'
 delete process.env.REVIEW_PASSWORD
+// Estas pruebas miran el panel, no la entrada: sin login (solo 127.0.0.1).
+// La entrada con usuarios se prueba en verify-acceso.
+process.env.KLIP_SIN_LOGIN = '1'
 
 /*
  * Sin nube, a proposito.
@@ -919,8 +922,8 @@ for (const ruta of ['/legal/terminos', '/legal/privacidad']) {
 const priv = await (await fetch(base + '/legal/privacidad')).text()
 check(
   'La privacidad declara la galleta real',
-  priv.includes('klip_llave') && priv.includes('HttpOnly'),
-  'klip_llave, HttpOnly',
+  priv.includes('klip_sesion') && priv.includes('HttpOnly'),
+  'klip_sesion, HttpOnly',
 )
 check(
   'Declara que la transcripcion viaja a Anthropic',
@@ -968,38 +971,39 @@ check('Una ruta desconocida da 404', ruta.status === 404, `${ruta.status}`)
 // es lo unico que separa el panel de internet: quien tenga la llave puede
 // encolar tareas que se ejecutan en otro ordenador.
 
+// Desde la Fase 2 la llave solo vale durante la transicion
+// (LEGACY_KEY_ENABLED=true), y sin ella se pide iniciar sesion.
 process.env.REVIEW_KEY = 'llave-de-prueba-muy-larga-1234567890'
+process.env.LEGACY_KEY_ENABLED = 'true'
+delete process.env.KLIP_SIN_LOGIN
 
 const sinLlave = await pedir('/api/overview')
 check(
-  'Sin llave no se entra, y sin sacar ningun dialogo',
-  sinLlave.status === 403 && String(sinLlave.body).includes('enlace'),
+  'Sin llave ni sesion no se entra, y sin sacar ningun dialogo',
+  sinLlave.status === 401,
   `${sinLlave.status}, sin cabecera www-authenticate`,
 )
 
-// Llegar sin llave tiene que dejar una salida. La primera version respondia una
-// linea de texto plano y quien caia ahi se quedaba encallado sin nada que
-// pulsar; se arreglo porque paso de verdad.
-const pagina403 = String(sinLlave.body)
+// Llegar sin llave lleva a la pantalla de entrada, no a un callejon.
+const portadaSinSesion = await fetch(base + "/", { redirect: "manual", headers: { accept: "text/html" } })
 check(
-  'La pantalla sin llave es una pagina con salida, no un texto suelto',
-  pagina403.includes('<form') && pagina403.includes('name="k"') &&
-    pagina403.includes('KLIP studio'),
-  `${pagina403.length} bytes, con formulario para pegar la llave`,
+  'La portada sin sesion lleva al login',
+  portadaSinSesion.status === 303 && (portadaSinSesion.headers.get('location') ?? '').startsWith('/login'),
+  `${portadaSinSesion.status} -> ${portadaSinSesion.headers.get('location')}`,
 )
 
-// Y esa salida tiene que funcionar: el formulario manda ?k= a la portada.
+// La llave sigue funcionando mientras dure la transicion.
 const desdeFormulario = await fetch(base + '/?k=' + process.env.REVIEW_KEY, {
   redirect: 'manual',
 })
 check(
-  'Pegar la llave en esa pantalla deja entrar',
+  'Con LEGACY_KEY_ENABLED la llave antigua deja entrar',
   desdeFormulario.status === 302,
   `${desdeFormulario.status} -> ${desdeFormulario.headers.get('location')}`,
 )
 
 const llaveMala = await pedir('/api/overview?k=llave-equivocada')
-check('Una llave que no es da 403', llaveMala.status === 403, `${llaveMala.status}`)
+check('Una llave que no es no entra', llaveMala.status === 401, `${llaveMala.status}`)
 
 // La primera visita con la llave redirige y deja la galleta.
 const conLlave = await fetch(base + '/?k=' + process.env.REVIEW_KEY, { redirect: 'manual' })
@@ -1030,7 +1034,12 @@ check(
 const galletaMala = await fetch(base + '/api/overview', {
   headers: { cookie: 'klip_llave=inventada' },
 })
-check('Una galleta falsificada no entra', galletaMala.status === 403, `${galletaMala.status}`)
+check('Una galleta falsificada no entra', galletaMala.status === 401, `${galletaMala.status}`)
+
+// Sin LEGACY_KEY_ENABLED la misma llave ya no vale.
+delete process.env.LEGACY_KEY_ENABLED
+const sinTransicion = await fetch(base + '/api/overview', { headers: { cookie: 'klip_llave=' + valor } })
+check('Sin LEGACY_KEY_ENABLED la llave antigua ya no entra', sinTransicion.status === 401, `${sinTransicion.status}`)
 
 delete process.env.REVIEW_KEY
 

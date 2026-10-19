@@ -13,7 +13,9 @@ import {
 } from './provider.js'
 import { type ValidatedClip } from './schema.js'
 import { dedupe, validateCandidates } from './validate.js'
-import { buildWindows, type TranscriptWindow } from './window.js'
+import { buildWindows, DEFAULT_WINDOW_SEC, type TranscriptWindow } from './window.js'
+import { crearProveedorLlm, nombreProveedor } from '../llm/provider.js'
+import { LlmSelectionProvider } from '../llm/seleccion.js'
 
 const log = createLogger('select')
 
@@ -81,6 +83,13 @@ export interface SelectResult {
   motivoCorte?: FalloSelect
   usage: { inputTokens: number; outputTokens: number; estimatedUsd: number | null }
   elapsedMs: number
+  /** Para el registro de uso: quien respondio y con que modelo. */
+  proveedor: string
+  modelo: string
+  /** Con la suscripcion no se calcula coste: se muestra "Incluido en la suscripción". */
+  incluidoEnSuscripcion: boolean
+  /** Llamadas que llegaron de verdad a la IA, reintentos incluidos y cache excluida. */
+  llamadas: number
 }
 
 /**
@@ -104,13 +113,17 @@ export function createSelectionProvider(preferido?: string): SelectionProvider {
   /*
    * El entorno manda sobre lo guardado, igual que con el proveedor de
    * publicacion: para una prueba suelta desde consola es mas comodo exportar
-   * una variable que tocar la base.
+   * una variable que tocar la base. La regla completa esta en
+   * `nombreProveedor` (src/llm/provider.ts).
    *
-   * `preferido` viene de Ajustes y usa los nombres del panel ('local'), no el
-   * del motor ('ollama'); se traducen aqui para no filtrar el nombre de una
-   * herramienta concreta a una pantalla que lee quien no la conoce.
+   * POR DEFECTO, LA SUSCRIPCION (claude-cli). La API de pago solo se usa si se
+   * pide con LLM_PROVIDER=anthropic-api: era la causa del 401.
    */
-  const elegido = optionalEnv('SELECT_PROVIDER') ?? (preferido === 'local' ? 'ollama' : preferido)
+  const elegido = nombreProveedor(preferido)
+
+  if (elegido === 'claude-cli') {
+    return new LlmSelectionProvider(crearProveedorLlm())
+  }
 
   if (elegido === 'ollama') {
     const ollamaModel = optionalEnv('OLLAMA_MODEL')
@@ -210,6 +223,31 @@ export async function selectClips(
     maxDurationSec: options.maxDurationSec ?? 90,
   }
 
+  /*
+   * Con la suscripcion, UN SOLO BLOQUE POR VIDEO SIEMPRE QUE QUEPA.
+   *
+   * Las ventanas de 15 minutos se pensaron para la API, donde cada llamada se
+   * paga por token y da igual partirla. Con la suscripcion lo que se gasta son
+   * llamadas, y cada una cuenta contra el limite de uso. Un modelo actual lee
+   * una hora y media de transcripcion sin problema, asi que si cabe va entera
+   * y el tope de momentos se escala a lo que habrian pedido las ventanas.
+   *
+   * Si no cabe, bloques de una hora con dos minutos de solape.
+   */
+  if (provider instanceof LlmSelectionProvider && options.windowSec === undefined) {
+    const caracteres = transcript.segments.reduce((n, s) => n + s.text.length + 16, 0)
+    const tope = Number(optionalEnv('LLM_MAX_CARACTERES') ?? '300000')
+    const cabe = caracteres <= tope
+    const bloqueSec = cabe ? Math.ceil(transcript.durationSec) + 1 : 60 * 60
+    options = {
+      ...options,
+      windowSec: bloqueSec,
+      overlapSec: cabe ? 0 : 2 * 60,
+    }
+    const ventanasEquivalentes = Math.max(1, Math.round(Math.min(bloqueSec, transcript.durationSec) / DEFAULT_WINDOW_SEC))
+    limits.maxClipsPerWindow = Math.min(30, limits.maxClipsPerWindow * ventanasEquivalentes)
+  }
+
   const allWindows = buildWindows(transcript, {
     ...(options.windowSec !== undefined ? { windowSec: options.windowSec } : {}),
     ...(options.overlapSec !== undefined ? { overlapSec: options.overlapSec } : {}),
@@ -264,9 +302,11 @@ export async function selectClips(
 
   const clips = dedupe(all)
 
+  // Con la suscripcion no hay precio por token: el coste es "incluido".
+  const suscripcion = provider instanceof LlmSelectionProvider && provider.incluidoEnSuscripcion
   const price = provider.name === 'ollama' ? { input: 0, output: 0 } : PRICING[provider.model]
   const estimatedUsd =
-    price === undefined
+    suscripcion ? null : price === undefined
       ? null
       : (inputTokens / 1_000_000) * price.input + (outputTokens / 1_000_000) * price.output
 
@@ -306,5 +346,9 @@ export async function selectClips(
     ...(motivoCorte === undefined ? {} : { motivoCorte }),
     usage: { inputTokens, outputTokens, estimatedUsd },
     elapsedMs,
+    proveedor: provider.name,
+    modelo: provider.model,
+    incluidoEnSuscripcion: suscripcion,
+    llamadas: provider instanceof LlmSelectionProvider ? provider.llamadas : windows.length,
   }
 }

@@ -100,6 +100,10 @@ export interface ResolvedClip {
   caption: string
   hashtags: string[]
   score: number
+  /** Titulo corto, distinto de la primera frase. Solo con la suscripcion. */
+  titulo?: string
+  /** Desglose del puntaje. Solo con la suscripcion. */
+  puntajes?: { gancho: number; cierre: number; retencion: number; total: number }
 }
 
 /** Candidato ya validado, con la ventana de la que salio. */

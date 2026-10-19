@@ -1,6 +1,6 @@
 import { createLogger } from '../lib/logger.js'
 import type { Transcript } from '../types.js'
-import type { ClipCandidate, ValidatedClip } from './schema.js'
+import type { ClipCandidate, ResolvedClip, ValidatedClip } from './schema.js'
 import { windowText, type TranscriptWindow } from './window.js'
 
 const log = createLogger('validate')
@@ -135,6 +135,11 @@ export function validateCandidates(
       caption: clip.caption,
       hashtags: clip.hashtags,
       score: clip.score,
+      // Solo los trae el proveedor de la suscripcion (src/llm/seleccion.ts).
+      ...('titulo' in clip && typeof clip.titulo === 'string' ? { titulo: clip.titulo } : {}),
+      ...('puntajes' in clip && typeof clip.puntajes === 'object' && clip.puntajes !== null
+        ? { puntajes: clip.puntajes as NonNullable<ResolvedClip['puntajes']> }
+        : {}),
       sourceId: transcript.sourceId,
       windowIndex: window.index,
     })

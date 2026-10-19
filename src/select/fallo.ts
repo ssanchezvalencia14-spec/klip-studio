@@ -1,3 +1,5 @@
+import { ErrorIA } from '../llm/errores.js'
+
 /**
  * Por que fallo una llamada, y si tiene sentido seguir intentandolo.
  *
@@ -12,7 +14,10 @@
  * Anthropic no vale, cambiala en el .env" es la diferencia entre media hora de
  * investigacion y treinta segundos.
  */
-export type ClaseDeFallo = 'auth' | 'saldo' | 'modelo' | 'limite' | 'pasajero'
+export type ClaseDeFallo =
+  | 'auth' | 'saldo' | 'modelo' | 'limite' | 'pasajero'
+  // De la suscripcion (claude-cli). Las tres primeras pausan la cola de IA.
+  | 'sin_sesion' | 'limite_ia' | 'no_encontrado' | 'respuesta_invalida'
 
 export interface FalloSelect {
   clase: ClaseDeFallo
@@ -20,6 +25,11 @@ export interface FalloSelect {
   definitivo: boolean
   /** Que le decimos a quien pulso el boton. */
   mensaje: string
+  /**
+   * La tarea no ha fallado: espera a que la IA vuelva. El trabajador la deja
+   * en `en_espera_ia` y pausa la cola de IA en vez de marcarla con error.
+   */
+  esperaIA?: { estado: 'sin_sesion' | 'limite' | 'no_encontrado'; reanudarEn?: string }
 }
 
 /**
@@ -29,6 +39,33 @@ export interface FalloSelect {
  * pruebas y el proveedor de Ollama lanzan Error normales sin status.
  */
 export function clasificarFallo(error: unknown): FalloSelect {
+  if (error instanceof ErrorIA) {
+    switch (error.clase) {
+      case 'sin_sesion':
+      case 'no_encontrado':
+        return {
+          clase: error.clase,
+          definitivo: true,
+          mensaje: error.message,
+          esperaIA: { estado: error.clase },
+        }
+      case 'limite':
+        return {
+          clase: 'limite_ia',
+          definitivo: true,
+          mensaje: error.message,
+          esperaIA: {
+            estado: 'limite',
+            ...(error.reanudarEn === undefined ? {} : { reanudarEn: error.reanudarEn.toISOString() }),
+          },
+        }
+      case 'respuesta_invalida':
+        return { clase: 'respuesta_invalida', definitivo: true, mensaje: error.message }
+      default:
+        return { clase: 'pasajero', definitivo: false, mensaje: error.message }
+    }
+  }
+
   const status = (error as { status?: number } | null)?.status
   const texto = error instanceof Error ? error.message : String(error)
   const bajo = texto.toLowerCase()
@@ -38,11 +75,12 @@ export function clasificarFallo(error: unknown): FalloSelect {
     return {
       clase: 'auth',
       definitivo: true,
+      // Sin instrucciones de configuracion: esto se lee en la pantalla
+      // principal. Como se cambia la clave lo explica docs/IA.md.
       mensaje:
-        'La clave de Anthropic no vale: la API la rechaza. Pon una nueva en ANTHROPIC_API_KEY ' +
-        'dentro del .env (se sacan en platform.claude.com, en API keys) y vuelve a lanzarlo. ' +
-        'Mientras tanto, si el video es musica, el boton "Es musica: buscar estribillos" no ' +
-        'usa la API.',
+        'La clave de la API de Anthropic no vale. Pide a quien administra el sistema que la ' +
+        'cambie, o que vuelva a la suscripción de Claude. Si el video es música, el botón ' +
+        '"Es música: buscar estribillos" no usa la IA.',
     }
   }
 

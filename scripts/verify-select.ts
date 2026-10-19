@@ -140,8 +140,10 @@ const check = (name: string, ok: boolean, detail: string): void => {
   )
   const a = clasificarFallo(err401)
   check(
-    'Una clave rechazada es definitiva y dice donde cambiarla',
-    a.clase === 'auth' && a.definitivo && a.mensaje.includes('ANTHROPIC_API_KEY'),
+    // Ya no nombra la variable: el mensaje sale en la pantalla principal, y
+    // ahi no van instrucciones de configuracion (Fase 1, punto 9).
+    'Una clave rechazada es definitiva y no manda a editar el .env',
+    a.clase === 'auth' && a.definitivo && !a.mensaje.includes('.env') && !a.mensaje.includes('ANTHROPIC_API_KEY'),
     `${a.clase} definitivo=${a.definitivo}`,
   )
 

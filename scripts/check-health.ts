@@ -68,7 +68,8 @@ function ejecutar(comando: string, args: string[]): Promise<string> {
       })
       hijo.on('close', (codigo) => {
         if (codigo === 0) resolve(salida)
-        else reject(new Error(`terminó con código ${codigo}`))
+        // La cola de la salida va en el error: sin ella no se sabe por que fallo.
+        else reject(new Error(`terminó con código ${codigo}: ${salida.trim().slice(-2000)}`))
       })
     }),
   )
@@ -140,8 +141,12 @@ async function baseDeDatos(): Promise<Resultado[]> {
  * yt-dlp), pero aqui se acepta el PATH como respaldo para poder decir "esta
  * instalado, aunque falta fijar la ruta" en vez de solo "falta la variable".
  */
-async function binario(pieza: string, variable: string, porDefecto: string, args: string[], extra?: (salida: string) => string | null): Promise<Resultado> {
-  const ruta = optionalEnv(variable)
+async function binario(pieza: string, variables: string | string[], porDefecto: string, args: string[], extra?: (salida: string) => string | null): Promise<Resultado> {
+  // Varios nombres valen para la misma ruta (YT_DLP_PATH es el del plan,
+  // YTDLP_PATH el de siempre): se usa el primero que este puesto.
+  const nombres = Array.isArray(variables) ? variables : [variables]
+  const variable = nombres[0]!
+  const ruta = nombres.map((n) => optionalEnv(n)).find((v) => v !== undefined)
   try {
     const salida = await ejecutar(ruta ?? porDefecto, args)
     const version = limpiar(salida.trim().split('\n')[0] ?? '')
@@ -174,11 +179,32 @@ async function ffmpeg(): Promise<Resultado> {
   } catch {
     // Si la version respondio y esto no, lo dira `npm run doctor`.
   }
+  /*
+   * Fase 8: NVENC de verdad, codificando un fotograma. Que el codificador
+   * aparezca en la lista no basta: con un driver de NVIDIA viejo aparece y
+   * luego cada render falla. Esta comprobacion daba verde en ese caso.
+   */
+  try {
+    await ejecutar(optionalEnv('FFMPEG_PATH') ?? 'ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=256x256:d=0.1',
+      '-frames:v', '1', '-c:v', 'h264_nvenc', '-f', 'null', '-',
+    ])
+  } catch (e) {
+    const texto = e instanceof Error ? e.message : String(e)
+    const minimo = /minimum required Nvidia driver for nvenc is ([\d.]+)/i.exec(texto)?.[1]
+    return {
+      ...r,
+      estado: 'fallo',
+      detalle: minimo
+        ? `el driver de NVIDIA es demasiado viejo para codificar con la tarjeta: actualízalo a la versión ${minimo} o más nueva`
+        : 'ffmpeg no puede codificar con la tarjeta NVIDIA (NVENC): comprueba el driver y que la tarjeta la soporte',
+    }
+  }
   return r
 }
 
 async function ytdlp(): Promise<Resultado> {
-  return binario('yt-dlp', 'YTDLP_PATH', 'yt-dlp', ['--version'])
+  return binario('yt-dlp', ['YT_DLP_PATH', 'YTDLP_PATH'], 'yt-dlp', ['--version'])
 }
 
 async function ia(): Promise<Resultado[]> {

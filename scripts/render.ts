@@ -145,6 +145,20 @@ async function main(): Promise<void> {
 
   const dir = workDir(sourceId)
 
+  /*
+   * Video musical con letra poco fiable (Fase 6): momentos lo deja anotado en
+   * musica.json y aqui se apagan los subtitulos. Una letra inventada quemada
+   * en el video es peor que ninguna.
+   */
+  const musicaPath = join(dir, 'musica.json')
+  if (!values['no-subs'] && existsSync(musicaPath)) {
+    const m = readJson<{ subtitulos?: boolean; confianzaLetra?: number }>(musicaPath)
+    if (m.subtitulos === false) {
+      values['no-subs'] = true
+      console.log(`Letra poco fiable (confianza ${m.confianzaLetra ?? '?'}): clips sin subtítulos.`)
+    }
+  }
+
   const transcriptPath = join(dir, 'transcript.json')
   if (!existsSync(transcriptPath)) {
     console.error(`A ${sourceId} le falta el texto de lo que se dice.`)

@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { copyFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { extractAudio } from '../src/ingest/audio.js'
+import { extractAudio, realzarVoz } from '../src/ingest/audio.js'
 import { downloadSource, esBloqueoYoutube, fetchMetadata } from '../src/ingest/download.js'
 import { SALIDA_NO_REINTENTAR } from '../src/jobs/reintentos.js'
 import { isKickVod, metadataFromKick } from '../src/ingest/kick.js'
@@ -75,8 +75,9 @@ async function main(): Promise<void> {
        */
       campana: { type: 'string' },
       /*
-       * Video musical. Tampoco se usa aqui: lo lee el encadenado al terminar
-       * para buscar estribillos (momentos) en vez de preguntar a la IA.
+       * Video musical. Aqui realza la voz antes de transcribir; ademas lo lee
+       * el encadenado al terminar para buscar estribillos (momentos) en vez
+       * de preguntar a la IA.
        */
       musica: { type: 'boolean', default: false },
     },
@@ -114,7 +115,9 @@ async function main(): Promise<void> {
     const videoPath = isLocalFile ? await adoptLocalFile(meta) : await downloadSource(meta)
 
     const audioPath = await extractAudio(meta.id, videoPath)
-    const rawPath = await transcribeAudio(meta.id, audioPath, {
+    // Una cancion se transcribe con la voz realzada (Fase 6).
+    const audioLetra = values.musica ? await realzarVoz(meta.id, audioPath) : audioPath
+    const rawPath = await transcribeAudio(meta.id, audioLetra, {
       language: values.lang,
       queueSeconds,
       force: values.force,

@@ -16,6 +16,12 @@
  *    tres veces. Se fuerza separacion entre ellos.
  * 3. QUE NO CORTEN UNA FRASE. Los limites se ajustan a los bordes de los
  *    segmentos del transcript.
+ * 4. ESTRIBILLO Y ENERGIA (Fase 6). Lo que se repite y lo que suena fuerte
+ *    puntua mas; ver src/select/musica.ts. Sin audio.wav se ordena solo por
+ *    voz, como antes.
+ *
+ * Tambien mide la confianza de la letra y la deja en musica.json: con una
+ * letra poco fiable el render sale sin subtitulos.
  *
  * NO decide solo: imprime la propuesta con sus cifras para revisarla antes de
  * gastar GPU. Renderizar treinta clips malos cuesta mas que leer una tabla.
@@ -25,12 +31,19 @@ import { loadEnv } from '../src/lib/env.js'
 import { readJson, workDir, writeJson } from '../src/lib/fsx.js'
 import { join } from 'node:path'
 import type { Transcript, TranscriptSegment } from '../src/types.js'
-
-/** Lo que whisper inventa en los tramos sin voz: tags de productor, *Musica*. */
-function esRuido(texto: string): boolean {
-  const t = texto.trim()
-  return t === '' || /^[[(*].*[\])*]$/.test(t)
-}
+import {
+  CONFIANZA_MINIMA,
+  confianzaLetra,
+  drops,
+  energia,
+  esRuido,
+  leerWav,
+  medirTramo,
+  normalizarEnergia,
+  puntajeMusica,
+  repeticiones,
+  type MedidaTramo,
+} from '../src/select/musica.js'
 
 interface Candidato {
   start: number
@@ -40,6 +53,8 @@ interface Candidato {
   segmentos: number
   /** Caracteres de letra por segundo. La cifra que separa voz de instrumental. */
   densidad: number
+  medida: MedidaTramo
+  puntaje: number
 }
 
 /**
@@ -81,6 +96,21 @@ function main(): void {
   const t = readJson<Transcript>(join(workDir(sourceId), 'transcript.json'))
   const segs = t.segments.filter((s) => !esRuido(s.text))
 
+  /*
+   * La energia sale del audio.wav del ingest. Si no esta (un VOD viejo, o
+   * borrado por la limpieza), se sigue sin ella: puntua solo voz y estribillo.
+   */
+  let norm: number[] = []
+  try {
+    const wav = leerWav(join(workDir(sourceId), 'audio.wav'))
+    norm = normalizarEnergia(energia(wav.muestras, wav.rate))
+  } catch {
+    console.log('Sin audio.wav: se puntua sin la energia de la cancion.')
+  }
+  const listaDrops = drops(norm)
+  const reps = repeticiones(segs)
+  const confianza = confianzaLetra(t.segments, t.durationSec)
+
   if (segs.length === 0) {
     console.error(`${sourceId} no tiene ningun segmento con voz.`)
     process.exit(1)
@@ -108,7 +138,10 @@ function main(): void {
     if (dentro.length === 0) continue
     const caracteres = dentro.reduce((n, s) => n + s.text.trim().length, 0)
     const palabras = dentro.reduce((n, s) => n + s.text.trim().split(/\s+/).length, 0)
+    const medida = medirTramo(ini, fin, norm, segs, reps, listaDrops)
     candidatos.push({
+      medida,
+      puntaje: puntajeMusica(medida),
       start: ini,
       end: fin,
       caracteres,
@@ -128,7 +161,7 @@ function main(): void {
    */
   const separacion = objetivo / 2
   const elegidos: Candidato[] = []
-  const restantes = [...candidatos].sort((a, b) => b.densidad - a.densidad)
+  const restantes = [...candidatos].sort((a, b) => b.puntaje - a.puntaje || b.densidad - a.densidad)
 
   for (const c of restantes) {
     if (elegidos.length >= cuantos) break
@@ -148,8 +181,10 @@ function main(): void {
     console.log('')
   }
 
-  console.log('corte        dur  palabras  densidad  segmentos')
-  console.log('-'.repeat(50))
+  console.log(`Letra: confianza ${confianza.toFixed(2)}${confianza < CONFIANZA_MINIMA ? ' (baja: sin subtitulos)' : ''}`)
+  console.log('')
+  console.log('corte        dur  palabras  densidad  segmentos  puntaje')
+  console.log('-'.repeat(59))
   const args: string[] = []
   for (const c of elegidos) {
     const ini = Math.round(c.start)
@@ -157,7 +192,7 @@ function main(): void {
     args.push(`--clip ${ini}-${fin}`)
     console.log(
       `${String(ini).padStart(4)}-${String(fin).padEnd(5)} ${String(fin - ini).padStart(4)}s ` +
-        `${String(c.palabras).padStart(9)} ${c.densidad.toFixed(1).padStart(9)} ${String(c.segmentos).padStart(10)}`,
+        `${String(c.palabras).padStart(9)} ${c.densidad.toFixed(1).padStart(9)} ${String(c.segmentos).padStart(10)} ${String(c.puntaje).padStart(8)}`,
     )
   }
 
@@ -204,12 +239,13 @@ function main(): void {
     start: Math.round(c.start),
     end: Math.round(c.end),
     hook: `${titulo} (${i + 1})`,
-    reason: `Tramo con mas voz: ${c.densidad.toFixed(1)} caracteres por segundo.`,
+    reason:
+      `Estribillo ${Math.round(c.medida.estribillo * 100)}%, energía ${Math.round(c.medida.energia * 100)}%, ` +
+      `${c.densidad.toFixed(1)} letras por segundo${c.medida.conDrop ? ', empieza en un cambio fuerte' : ''}.`,
     caption: i === 0 ? titulo : `${titulo} (${i + 1})`,
     hashtags: [],
-    // Nota derivada de la densidad, acotada. No es una valoracion de calidad:
-    // es lo unico medible sin un modelo que escuche la cancion.
-    score: Math.max(50, Math.min(85, Math.round(50 + c.densidad * 2))),
+    // Estribillo, energia, voz y drop: lo medible sin un modelo que escuche.
+    score: c.puntaje,
   }))
 
   writeJson(join(workDir(sourceId), 'clips.json'), {
@@ -228,12 +264,23 @@ function main(): void {
    * justo lo que pedia el texto que habia antes en su lugar: abrir una terminal
    * y escribir el render a mano.
    */
+  /*
+   * La confianza de la letra, para el render (subtitulos si o no) y para el
+   * panel (sources.confianza_letra). Un fichero aparte y no un campo de
+   * clips.json: clips.json lo reescribe tambien select.
+   */
+  writeJson(join(workDir(sourceId), 'musica.json'), {
+    confianzaLetra: confianza,
+    subtitulos: confianza >= CONFIANZA_MINIMA,
+  })
+
   console.log(`${clips.length} corte(s) anotados en clips.json.`)
   console.log('')
   console.log('='.repeat(78))
   console.log(`Fuente    : ${sourceId}`)
   console.log(`Clips     : ${clips.length}`)
-  console.log('Metodo    : densidad de voz, sin gastar API')
+  console.log('Metodo    : estribillo, energia y voz, sin gastar API')
+  console.log(`Confianza : ${confianza.toFixed(2)}`)
   console.log('='.repeat(78))
 }
 

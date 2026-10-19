@@ -297,6 +297,7 @@ export async function publicarResultado(
     case 'momentos':
     case 'render': {
       await publicarFuente(db, ownerId, sourceId)
+      if (kind === 'momentos') await anotarMusica(db, ownerId, sourceId)
       const n = await publicarClips(db, ownerId, sourceId)
       log.info(`${n} momento(s) de ${sourceId} publicados en el panel`)
       return
@@ -311,4 +312,20 @@ export async function publicarResultado(
     default:
       return
   }
+}
+
+/**
+ * Lo que dejo momentos en musica.json: la confianza de la letra (Fase 6).
+ * El panel la enseña y explica por que un clip musical salio sin subtitulos.
+ */
+async function anotarMusica(db: Db, ownerId: string, sourceId: string): Promise<void> {
+  const ruta = join(paths.work, sourceId, 'musica.json')
+  if (!existsSync(ruta)) return
+  const m = readJson<{ confianzaLetra?: number }>(ruta)
+  const c = Number(m.confianzaLetra)
+  if (!Number.isFinite(c)) return
+  await db.query(
+    `update sources set tipo = 'musica', confianza_letra = $3 where owner_id = $1 and id = $2`,
+    [ownerId, sourceId, Math.max(0, Math.min(1, c))],
+  )
 }

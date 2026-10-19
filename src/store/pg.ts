@@ -48,6 +48,10 @@ export interface SourceRow {
   rejected: number
   variants: number
   updatedAt: string
+  /** 'entrevista', 'stream' o 'musica' (Fase 6). */
+  tipo?: string
+  /** Confianza 0..1 en la letra de un video musical; null si no se midio. */
+  confianzaLetra?: number | null
 }
 
 export interface Store {
@@ -462,7 +466,7 @@ export function createStore(db: Db, ownerId: string): Store {
       all: async () => {
         const filas = await db.query(
           `select s.id, s.title, s.duration_sec, s.has_transcript, s.variants_count,
-                  s.updated_at,
+                  s.updated_at, s.tipo, s.confianza_letra,
                   count(c.clip_id)::int as clips,
                   count(c.clip_id) filter (where c.master_path <> '')::int as rendered,
                   -- Cuantos pasaron la compuerta. Es lo unico que puede generar
@@ -474,7 +478,7 @@ export function createStore(db: Db, ownerId: string): Store {
            left join clips c on c.source_id = s.id and c.owner_id = s.owner_id
            where s.owner_id = $1
            group by s.id, s.title, s.duration_sec, s.has_transcript,
-                    s.variants_count, s.updated_at
+                    s.variants_count, s.updated_at, s.tipo, s.confianza_letra
            order by s.updated_at desc`,
           [ownerId],
         )
@@ -490,6 +494,9 @@ export function createStore(db: Db, ownerId: string): Store {
           rejected: Number(r.rejected),
           variants: Number(r.variants_count),
           updatedAt: new Date(r.updated_at as string).toISOString(),
+          tipo: typeof r.tipo === 'string' ? r.tipo : 'entrevista',
+          confianzaLetra:
+            r.confianza_letra === null || r.confianza_letra === undefined ? null : Number(r.confianza_letra),
         }))
       },
 

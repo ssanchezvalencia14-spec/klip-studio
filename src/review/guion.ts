@@ -1060,6 +1060,19 @@ function notaVideo(s, e, o) {
   return e.activo ? textos[e.ahora] : 'En cola: empezará en cuanto el procesador esté libre.';
 }
 
+/**
+ * El aviso de un video musical: derechos de autor y, si ya se midio, si la
+ * letra era fiable para quemarla en los clips.
+ */
+function avisoMusica(s) {
+  const letra = s.confianzaLetra === null || s.confianzaLetra === undefined ? ''
+    : s.confianzaLetra < 0.5
+      ? ' La letra no se entendió bien, así que los clips salen sin subtítulos.'
+      : ' La letra se entendió bien y va en subtítulos.';
+  return '<p class="video-aviso">' + ico('alerta') +
+    '<span>La música con derechos de autor puede ser bloqueada o silenciada por las plataformas.' + letra + '</span></p>';
+}
+
 /** Tarjeta de un video, con sus cuatro etapas. */
 function pintarVideo(s, o) {
   const e = estadoVideo(s, o);
@@ -1095,6 +1108,7 @@ function pintarVideo(s, o) {
   return '<article class="card video-card' + (e.activo ? ' trabajando' : '') + '"><div class="body">' +
     '<div class="video-cab">' +
       '<button class="srctitle" data-vod="' + esc(s.sourceId) + '">' + esc(s.title) + '</button>' +
+      (s.tipo === 'musica' ? '<span class="estado-chip">' + ico('musica') + 'Música</span>' : '') +
       chip +
     '</div>' +
     '<p class="video-meta">' +
@@ -1103,6 +1117,7 @@ function pintarVideo(s, o) {
     '</p>' +
     '<ol class="etapas">' + etapas + '</ol>' +
     '<p class="video-nota">' + esc(notaVideo(s, e, o)) + '</p>' +
+    (s.tipo === 'musica' ? avisoMusica(s) : '') +
     '<div class="chips">' + acciones.join('') + '</div>' +
   '</div></article>';
 }
@@ -2424,10 +2439,21 @@ function opcionesHora(actual) {
   return out;
 }
 
-/** Desplegable generico a partir de pares [valor, texto]. */
+/**
+ * Desplegable generico a partir de pares [valor, texto].
+ *
+ * Se compara como texto: con Number() las listas de palabras ('rostro',
+ * 'direct') nunca marcaban la guardada. Las booleanas viajan como 1/0. Si el
+ * valor guardado no esta en la lista, se añade: sin el, el navegador marcaba
+ * la primera opcion y el siguiente Guardar escribia un valor que nadie eligio.
+ */
 function opciones(lista, actual) {
-  return lista.map(([v, t]) =>
-    '<option value="' + v + '"' + (Number(actual) === v ? ' selected' : '') + '>' + t + '</option>'
+  const a = String(typeof actual === 'boolean' ? Number(actual) : actual);
+  const esta = lista.some(([v]) => String(v) === a);
+  const extra = esta || actual === undefined || actual === null || actual === ''
+    ? '' : '<option value="' + esc(a) + '" selected>' + esc(a) + '</option>';
+  return extra + lista.map(([v, t]) =>
+    '<option value="' + v + '"' + (String(v) === a ? ' selected' : '') + '>' + t + '</option>'
   ).join('');
 }
 
@@ -2746,8 +2772,9 @@ const CORTES = [
       },
       {
         key: 'subMargin', texto: 'Altura sobre el borde',
-        lista: [[200, 'abajo del todo'], [300, 'bajo'], [380, 'normal'],
-                [500, 'alto'], [700, 'casi en el centro']],
+        // Desde 400: por debajo lo tapa la interfaz de TikTok (ZONA_SEGURA_PX).
+        lista: [[400, 'lo más bajo posible'], [480, 'normal'], [580, 'alto'],
+                [700, 'muy alto'], [900, 'casi en el centro']],
       },
       { key: 'subColor', texto: 'Color del texto', color: true },
       { key: 'subColorBorde', texto: 'Color del borde', color: true },

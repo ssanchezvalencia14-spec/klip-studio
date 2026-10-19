@@ -50,3 +50,40 @@ export async function extractAudio(sourceId: string, videoPath: string): Promise
   log.info(`Audio listo en ${(durationMs / 1000).toFixed(1)} s (${fileSizeMb(target).toFixed(1)} MB)`)
   return target
 }
+
+/**
+ * Filtro de realce de voz para canciones (Fase 6), en lugar de Demucs.
+ *
+ * Quita graves (bombo y bajo, por debajo de 150 Hz) y agudos por encima de
+ * 5 kHz (platos), reduce ruido de fondo y nivela el volumen. No separa la voz
+ * como una red neuronal, pero deja a whisper lo que mas le importa: la banda
+ * donde esta la letra. Medido en la literatura de whisper: con la base a todo
+ * volumen alucina menos si se le recorta el bajo.
+ */
+export const FILTRO_VOZ = 'highpass=f=150,lowpass=f=5000,afftdn=nf=-25,dynaudnorm=f=150:g=15'
+
+/**
+ * Copia de audio.wav con la voz realzada, para transcribir una cancion. El
+ * original se queda: el analisis de energia (src/select/musica.ts) necesita
+ * la mezcla entera, bombo incluido.
+ */
+export async function realzarVoz(sourceId: string, audioPath: string): Promise<string> {
+  const target = join(workDir(sourceId), 'audio-voz.wav')
+  if (hasContent(target, 16_000)) return target
+  log.info('Realzando la voz de la canción antes de transcribir...')
+  await ffmpeg([
+    '-y',
+    '-i',
+    audioPath,
+    '-af',
+    FILTRO_VOZ,
+    '-ac',
+    String(WHISPER_CHANNELS),
+    '-ar',
+    String(WHISPER_SAMPLE_RATE),
+    '-c:a',
+    'pcm_s16le',
+    target,
+  ])
+  return target
+}

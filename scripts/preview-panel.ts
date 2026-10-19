@@ -49,6 +49,7 @@ await pg.exec(`
   insert into sources (id, owner_id, title, duration_sec, has_transcript, variants_count)
     values ('vod-uno', '${OWNER}', 'Directo del lunes', 7200, true, 4),
            ('vod-dos', '${OWNER}', 'Maraton del sabado', 14400, true, 0);
+  update sources set tipo = 'musica', confianza_letra = 0.3 where id = 'vod-dos';
 
   insert into clips (owner_id, source_id, clip_id, start_sec, end_sec, hook, reason,
                      caption, hashtags, score, status, master_path)

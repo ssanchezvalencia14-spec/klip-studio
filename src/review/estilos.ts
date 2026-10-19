@@ -2566,4 +2566,9 @@ export const CSS = `  :root {
   .lineas-sub li { display: grid; grid-template-columns: 52px 1fr; gap: var(--s2); align-items: center; }
   .lineas-sub .dato { font-size: 11.5px; color: var(--faint); }
   .lineas-sub input { min-height: 38px; }
+  /* Video musical: aviso de derechos y de la letra (Fase 6). */
+  .video-aviso { display: flex; gap: var(--s2); align-items: flex-start; margin: 0 0 var(--s3);
+    padding: var(--s2) var(--s3); border-radius: 8px; font-size: var(--t-meta);
+    background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); color: var(--aviso-texto); }
+  .video-aviso svg { flex: none; width: 16px; height: 16px; margin-top: 2px; }
 `

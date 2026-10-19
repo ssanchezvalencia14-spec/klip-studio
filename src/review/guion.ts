@@ -34,6 +34,7 @@ const SECCIONES = {
     ['plataformas', 'Cuentas'],
     ['flujo', 'Horarios'],
     ['ajustes', 'Marca y textos'],
+    ['ia', 'IA'],
     ['registro', 'Historial'],
   ] },
 };
@@ -55,6 +56,7 @@ const INTROS = {
   flujo: 'A que hora y con que frecuencia sale cada video.',
   ajustes: 'Como se cortan los videos, como se ven los subtitulos y que texto los acompaña.',
   registro: 'Todo lo que ha hecho el programa, lo que tardo y lo que costo.',
+  ia: 'La IA que elige los mejores momentos: si está lista y cómo probarla.',
 };
 
 /** De que seccion es cada vista. Se deriva del mapa para no repetirlo. */
@@ -404,6 +406,12 @@ async function refrescar() {
   if (state.view === 'clips') await cargarClips();
   if (state.view === 'cola') state.queue = await api('/api/queue');
   if (state.view === 'registro') state.runs = await api('/api/runs');
+  if (state.view === 'ia') {
+    // Las tareas tambien: "Probar IA" es una tarea y hay que ver si sigue en marcha.
+    const [ia, jobs] = await Promise.all([api('/api/ia'), api('/api/jobs')]);
+    state.ia = ia;
+    state.jobs = jobs.jobs;
+  }
   if (state.view === 'flujo') state.settings = await api('/api/settings');
   if (state.view === 'ajustes') state.ajustes = await api('/api/ajustes');
   if (state.view === 'proyectos') {
@@ -533,7 +541,8 @@ function pintarJob(job, destacado) {
       '<div class="joghead">' +
         '<span class="jobname">' + esc(job.label) + '</span>' +
         '<span class="badge ' + clase + '">' +
-          ({queued:'esperando', running:'trabajando', ok:'listo', error:'fallo', cancelled:'cancelado'}[job.status]) +
+          ({queued:'esperando', running:'trabajando', ok:'listo', error:'fallo', cancelled:'cancelado',
+            en_espera_ia:'esperando a la IA'}[job.status]) +
         '</span>' +
       '</div>' +
       (job.lastLine ? '<div class="jobline">' + esc(job.lastLine) + '</div>' : '') +
@@ -967,13 +976,14 @@ function vistaProceso() {
    * no hacen falta en la pantalla donde se empieza a trabajar, y que ademas se
    * repiten ahora que el historial completo tiene su propio sitio en Ajustes.
    */
-  const fallos = state.jobs.filter(j => j.status === 'error').slice(0, 3);
+  const fallos = agruparFallos(state.jobs).slice(0, 3);
 
   let html = '';
 
   // Si hay algo corriendo, eso ES el estado y va primero. Si no, lo primero es
   // que toca hacer.
   html += activo ? pintarJob(activo, true) : pintarSiguiente(o, ocupado);
+  html += pintarAvisoIA(o.ia);
 
   html += '<div class="card paso-2"><div class="stats">' +
     '<div><b' + (o.clips.pending > 0 ? ' style="color:var(--azul-texto)"' : '') + '>' +
@@ -1138,10 +1148,136 @@ function vistaProceso() {
 
   // Solo si hay algo roto. Un Inicio limpio significa que no hay nada que mirar.
   if (fallos.length > 0) {
-    html += seccion('&#9888;', 'Algo fallo', 'Trabajos que no salieron bien. Si esta vacio, no hay nada que mirar.') + fallos.map(pintarJob).join('') +
+    html += seccion('&#9888;', 'Algo falló', 'Trabajos que no salieron bien. Si está vacío, no hay nada que mirar.') +
+      fallos.map(pintarGrupoFallo).join('') +
       '<p class="reason" style="margin:var(--s3) 0 0">' +
-      'El resto de lo que ha pasado esta en Ajustes, en Historial.</p>';
+      'El resto de lo que ha pasado está en Ajustes, en Historial.</p>';
   }
+
+  return html;
+}
+
+/**
+ * Los fallos, agrupados por paso y video.
+ *
+ * El mismo paso del mismo video fallando cuatro veces eran cuatro tarjetas
+ * identicas (hubo un video con 28 intentos de "Elegir momentos"). Ahora es una
+ * sola, con el contador, y con lo unico que se puede hacer: reintentar una vez
+ * o quitarla de en medio.
+ */
+function agruparFallos(jobs) {
+  const grupos = new Map();
+  for (const j of jobs) {
+    if (j.status !== 'error') continue;
+    const clave = j.kind + '|' + (j.args || []).join('|');
+    const g = grupos.get(clave);
+    if (g) g.ids.push(j.id);
+    else grupos.set(clave, { ultimo: j, ids: [j.id] });
+  }
+  return [...grupos.values()];
+}
+
+function pintarGrupoFallo(g) {
+  const j = g.ultimo;
+  const abierto = state.openLog === j.id;
+  const n = g.ids.length;
+  return '<article class="card job error"><div class="body">' +
+    '<div class="joghead">' +
+      '<span class="jobname">' + esc(j.label) + '</span>' +
+      '<span class="badge bad">' + (n > 1 ? 'falló ' + n + ' veces' : 'falló') + '</span>' +
+    '</div>' +
+    (j.lastLine ? '<div class="jobline">' + esc(j.lastLine) + '</div>' : '') +
+    '<div class="actions" style="margin-top:10px">' +
+      '<button class="chip" data-grupo-reintentar="' + esc(g.ids.join(',')) + '">Reintentar</button>' +
+      '<button class="chip" data-grupo-descartar="' + esc(g.ids.join(',')) + '">Descartar</button>' +
+      '<button class="chip" data-log="' + j.id + '">' + (abierto ? 'Ocultar detalles' : 'Ver detalles') + '</button>' +
+    '</div>' +
+    (abierto
+      ? '<div class="log" id="log-' + j.id + '"><div class="hueso medio"></div><div class="hueso"></div></div>'
+      : '') +
+  '</div></article>';
+}
+
+/**
+ * Un solo aviso de la IA en Inicio, y solo cuando hace falta.
+ *
+ * Sin sesion o con limite, la cola de IA se pausa y las tareas esperan. Antes
+ * cada una fallaba por su cuenta y el panel se llenaba de tarjetas iguales que
+ * mandaban a editar el .env. Ahora es una frase, que hacer, y un boton.
+ */
+/*
+ * La frase del estado, con la hora en la del navegador.
+ *
+ * El servidor ya manda una frase, pero el panel vive en Hostinger y su reloj
+ * no tiene por que estar en la zona de quien mira: "vuelve a las 02:56" en UTC
+ * seria una hora equivocada. Solo esa frase se rehace aqui.
+ */
+function textoIA(ia) {
+  if (ia.estado === 'limite' && ia.reanudarEn) {
+    return 'IA con límite, vuelve a las ' +
+      new Date(ia.reanudarEn).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  return ia.texto;
+}
+
+function pintarAvisoIA(ia) {
+  if (!ia || (!ia.pausada && !ia.enEspera)) return '';
+  // Con hora de vuelta, lo que espera sigue solo; sin ella, hace falta el boton.
+  const sola = ia.estado === 'limite' && ia.reanudarEn;
+  const espera = ia.enEspera > 0
+    ? ' ' + (ia.enEspera === 1 ? '1 tarea espera' : ia.enEspera + ' tareas esperan') +
+      (sola ? ' y ' + (ia.enEspera === 1 ? 'seguirá sola.' : 'seguirán solas.') : '. Pulsa "Reintentar" cuando esté arreglado.')
+    : '';
+  return '<article class="card"><div class="body"><div class="warn" style="margin:0">' +
+    '<b>' + esc(textoIA(ia)) + '.</b>' + espera +
+    '<div class="actions" style="margin-top:10px">' +
+      '<button class="chip" data-ia-reintentar="1">Reintentar</button>' +
+      '<button class="chip" data-ir="ia">Ver la IA</button>' +
+    '</div>' +
+  '</div></div></article>';
+}
+
+// --- Vista: IA ------------------------------------------------------------
+
+function vistaIA() {
+  const ia = state.ia;
+  if (!ia) return esqueleto(1, false);
+
+  const probando = state.jobs.find(j => j.kind === 'probar-ia' && vivo(j));
+  const ok = ia.estado === 'lista';
+  const chip = ok ? 'ok' : ia.estado === 'desconocido' ? '' : 'bad';
+  const nombre = {
+    'claude-cli': 'Claude Code, con tu suscripción',
+    'anthropic-api': 'API de Anthropic',
+    'ollama': 'Modelo local',
+  }[ia.proveedor] || 'Claude Code, con tu suscripción';
+
+  let html = '<article class="card hero paso-1"><div class="body">' +
+    '<div class="joghead">' +
+      '<span class="jobname">' + esc(textoIA(ia)) + '</span>' +
+      '<span class="badge ' + chip + '">' + (ok ? 'lista' : ia.estado === 'desconocido' ? 'sin comprobar' : 'no disponible') + '</span>' +
+    '</div>' +
+    (ia.mensaje && !ok ? '<p class="reason" style="margin:var(--s3) 0 0">' + esc(ia.mensaje) + '</p>' : '') +
+    '<div style="margin-top:var(--s3);font-size:var(--t-meta);line-height:1.7">' +
+      '<div><span style="color:var(--faint)">Proveedor</span>  ' + esc(nombre) + '</div>' +
+      (ia.modelo ? '<div><span style="color:var(--faint)">Modelo</span>  ' + esc(ia.modelo) + '</div>' : '') +
+      '<div><span style="color:var(--faint)">Coste</span>  ' + esc(ia.coste) + '</div>' +
+      (ia.comprobadoEn ? '<div><span style="color:var(--faint)">Última comprobación</span>  ' + fecha(ia.comprobadoEn) + '</div>' : '') +
+      (ia.enEspera > 0 ? '<div><span style="color:var(--faint)">Esperando</span>  ' + (ia.enEspera === 1 ? '1 tarea' : ia.enEspera + ' tareas') + '</div>' : '') +
+    '</div>' +
+    '<div class="actions" style="margin-top:var(--s4)">' +
+      '<button class="act go" data-run="probar-ia"' + (probando ? ' disabled' : '') + '>' +
+        (probando ? 'Probando…' : 'Probar IA') + '</button>' +
+      (ia.pausada || ia.enEspera > 0 ? '<button class="chip" data-ia-reintentar="1">Reintentar</button>' : '') +
+    '</div>' +
+  '</div></article>';
+
+  html += '<details class="nota"><summary>Si dice que no hay sesión</summary>' +
+    '<p>La IA corre en el ordenador que procesa los videos. Ahí, abre Claude Code, ' +
+    'escribe /login y entra con tu cuenta. Después pulsa "Probar IA".</p>' +
+    '<p>"Probar IA" hace una pregunta mínima desde ese ordenador. Si está apagado, ' +
+    'la prueba espera a que se encienda.</p>' +
+  '</details>';
 
   return html;
 }
@@ -1575,6 +1711,8 @@ function vistaRegistro() {
         '<p class="reason" style="margin:var(--s3) 0 0">' +
           dur(run.durationMs) +
           (run.costUsd > 0 ? ' · $' + run.costUsd.toFixed(4) : '') +
+          // Con la suscripcion no hay coste por tarea que calcular.
+          (run.output && run.output.coste === 'Incluido en la suscripción' ? ' · Incluido en la suscripción' : '') +
           (run.tokens
             ? ' · ' + run.tokens.inputTokens.toLocaleString('es') + ' / ' +
               run.tokens.outputTokens.toLocaleString('es') + ' tokens'
@@ -2954,6 +3092,7 @@ function render() {
   if (state.view === 'clips') view.innerHTML = vistaClips();
   if (state.view === 'cola') view.innerHTML = vistaCola();
   if (state.view === 'registro') view.innerHTML = vistaRegistro();
+  if (state.view === 'ia') view.innerHTML = vistaIA();
   if (state.view === 'flujo') view.innerHTML = vistaFlujo();
   if (state.view === 'ajustes') view.innerHTML = vistaAjustes();
   if (state.view === 'proyectos') view.innerHTML = vistaProyectos();
@@ -3178,6 +3317,42 @@ document.addEventListener('click', async e => {
     state.view = vistas.some(([v]) => v === recordada) ? recordada : vistas[0][0];
     state.openLog = null;
     menu(false);
+    refrescar();
+    return;
+  }
+
+  // La IA estaba en pausa: quitarla y devolver a la cola lo que esperaba.
+  const iaReintentar = e.target.closest('[data-ia-reintentar]');
+  if (iaReintentar) {
+    iaReintentar.disabled = true;
+    try {
+      const r = await api('/api/ia/reintentar', { method: 'POST' });
+      avisar(r.reanudadas > 0
+        ? (r.reanudadas === 1 ? '1 tarea vuelve a la cola.' : r.reanudadas + ' tareas vuelven a la cola.')
+        : 'Listo. La próxima tarea volverá a probar la IA.');
+    } catch (err) {
+      avisar(err.message);
+    }
+    refrescar();
+    return;
+  }
+
+  // Un grupo de fallos iguales: reintentar una vez, o quitarlo de Inicio.
+  const grupo = e.target.closest('[data-grupo-reintentar], [data-grupo-descartar]');
+  if (grupo) {
+    const reintentar = grupo.hasAttribute('data-grupo-reintentar');
+    const ids = (reintentar ? grupo.dataset.grupoReintentar : grupo.dataset.grupoDescartar).split(',');
+    grupo.disabled = true;
+    try {
+      await api(reintentar ? '/api/jobs/reintentar' : '/api/jobs/descartar', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      avisar(reintentar ? 'Se vuelve a intentar.' : 'Quitado de Inicio. Sigue en el Historial.');
+    } catch (err) {
+      avisar(err.message);
+    }
     refrescar();
     return;
   }

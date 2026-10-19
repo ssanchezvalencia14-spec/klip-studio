@@ -100,7 +100,22 @@ await pg.exec(`
       ('j3', '${OWNER}', 'ingest', '{https://ejemplo}', 'Descargar y transcribir', 'error',
        'yt-dlp devolvio 403', 1, now() - interval '3 hours', now() - interval '3 hours'),
       ('j4', '${OWNER}', 'doctor', '{}', 'Diagnostico del entorno', 'ok',
-       'todo correcto', 0, now() - interval '2 days', now() - interval '2 days');
+       'todo correcto', 0, now() - interval '2 days', now() - interval '2 days'),
+      -- El mismo fallo tres veces: se tiene que ver como UNA tarjeta.
+      ('j5', '${OWNER}', 'render', '{vod-dos}', 'Renderizar vod-dos', 'error',
+       'ffmpeg termino con error', 1, now() - interval '50 minutes', now() - interval '50 minutes'),
+      ('j6', '${OWNER}', 'render', '{vod-dos}', 'Renderizar vod-dos', 'error',
+       'ffmpeg termino con error', 1, now() - interval '45 minutes', now() - interval '45 minutes'),
+      ('j7', '${OWNER}', 'render', '{vod-dos}', 'Renderizar vod-dos', 'error',
+       'ffmpeg termino con error', 1, now() - interval '40 minutes', now() - interval '40 minutes'),
+      -- Una tarea esperando a la IA, que esta en limite (abajo).
+      ('j8', '${OWNER}', 'select', '{vod-dos}', 'Elegir momentos de vod-dos', 'en_espera_ia',
+       'La IA llegó al límite de uso.', 75, now() - interval '20 minutes', now() - interval '20 minutes');
+
+  -- La IA con limite de uso: el aviso unico de Inicio y la pantalla Ajustes, IA.
+  insert into ia_estado (owner_id, estado, mensaje, reanudar_en, proveedor, modelo)
+    values ('${OWNER}', 'limite', 'La IA llegó al límite de uso.',
+            now() + interval '2 hours', 'claude-cli', 'sonnet');
 
   insert into runs (id, owner_id, kind, label, started_at, ended_at, duration_ms,
                     status, input, output, input_tokens, output_tokens, cost_usd)

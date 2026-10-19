@@ -45,6 +45,7 @@ import { renderPage } from './page.js'
 import { renderPerdido } from './perdido.js'
 import { BadRequest, buildJob } from './pipeline.js'
 import { storeUpload, UploadError } from './upload.js'
+import { createEstadoIA, iaPausada, textoEstadoIA } from '../llm/estado.js'
 
 const log = createLogger('review')
 
@@ -623,6 +624,26 @@ function enMarcha(jobs: Job[]): Job | null {
   return jobs.find((j) => j.status === 'running') ?? jobs.find((j) => j.status === 'queued') ?? null
 }
 
+/**
+ * Lo que el panel enseña de la IA: estado, frase lista para pintar, si esta
+ * en pausa y cuantas tareas la esperan. Lo escribe el trabajador del PC.
+ */
+async function resumenIA(db: Db, ownerId: string): Promise<Record<string, unknown>> {
+  const info = await createEstadoIA(db, ownerId).leer()
+  const filas = await db.query<{ n: string }>(
+    `select count(*) as n from jobs where owner_id = $1 and status = 'en_espera_ia'`,
+    [ownerId],
+  )
+  return {
+    ...info,
+    texto: textoEstadoIA(info),
+    pausada: iaPausada(info),
+    enEspera: Number(filas[0]?.n ?? 0),
+    // Con la suscripcion el coste no se calcula.
+    coste: info.proveedor === 'anthropic-api' ? 'Según uso de la API' : 'Incluido en la suscripción',
+  }
+}
+
 /** Estado general para la vista de monitorizacion. */
 async function buildOverview(
   store: Store,
@@ -722,6 +743,8 @@ async function buildOverview(
     // Si el ordenador que procesa esta escuchando. Viaja siempre para que el
     // panel pueda avisar ANTES de que alguien pegue un enlace, no despues.
     trabajador: await cola.trabajadorVivo(),
+    // El estado de la IA, para el aviso unico de Inicio y para Ajustes, IA.
+    ia: await resumenIA(db, ownerId),
     /*
      * El objetivo diario, calculado sobre las cuentas QUE HAY.
      *
@@ -1284,6 +1307,64 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
 
   if (path === '/api/overview' && req.method === 'GET') {
     sendJson(res, 200, await buildOverview(store, cola, db, ownerId))
+    return
+  }
+
+  // --- IA -----------------------------------------------------------------------
+
+  if (path === '/api/ia' && req.method === 'GET') {
+    sendJson(res, 200, await resumenIA(db, ownerId))
+    return
+  }
+
+  /*
+   * "Reintentar": quita la pausa y devuelve a la cola lo que esperaba.
+   *
+   * No llama a la IA desde aqui: el panel no la tiene, vive en el PC. Si sigue
+   * sin estar, la primera tarea lo dira otra vez, una sola vez.
+   */
+  if (path === '/api/ia/reintentar' && req.method === 'POST') {
+    const reanudadas = await createEstadoIA(db, ownerId).reanudar(true)
+    avisarCambio('trabajos')
+    sendJson(res, 200, { reanudadas })
+    return
+  }
+
+  /*
+   * Fallos agrupados: reintentar o descartar el grupo entero.
+   *
+   * Un mismo paso de un mismo video que falla cuatro veces se enseña como UNA
+   * tarjeta ("falló 4 veces"). Reintentar encola el paso una sola vez y retira
+   * los fallos del grupo; descartar solo los retira. No se borra nada: pasan a
+   * 'cancelled' y siguen en el historial.
+   */
+  if ((path === '/api/jobs/reintentar' || path === '/api/jobs/descartar') && req.method === 'POST') {
+    const body = (await readBody(req)) as { ids?: unknown }
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((x): x is string => typeof x === 'string').slice(0, 200)
+      : []
+    if (ids.length === 0) {
+      sendJson(res, 400, { error: 'No se indicó qué tareas.' })
+      return
+    }
+    let encolada: unknown = null
+    if (path === '/api/jobs/reintentar') {
+      const base = await cola.porId(ids[0] ?? '')
+      if (base === null) {
+        sendJson(res, 404, { error: 'Esa tarea ya no existe.' })
+        return
+      }
+      const sourceId = base.args[0]
+      const yaEsta = sourceId !== undefined && (await cola.hayActiva([base.kind], sourceId))
+      if (!yaEsta) encolada = await cola.encolar(base.kind, base.args, base.label)
+    }
+    await db.query(
+      `update jobs set status = 'cancelled', ended_at = coalesce(ended_at, now())
+        where owner_id = $1 and id = any($2::text[]) and status = 'error'`,
+      [ownerId, ids],
+    )
+    avisarCambio('trabajos')
+    sendJson(res, 200, { encolada })
     return
   }
 

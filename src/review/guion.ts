@@ -3879,24 +3879,92 @@ function vistaMetricas() {
       '</details>' +
     '</div></div>'
     : '') +
+    resumenSemanal(m.semana) +
     '<div class="card"><div class="stats">' +
       '<div><b>' + m.published + '</b><span>Subidos</span></div>' +
       '<div><b>' + m.snapshots + '</b><span>Mediciones</span></div>' +
-      '<div><b>' + hora(m.lastCapture) + '</b><span>Ultima</span></div>' +
+      '<div><b>' + hora(m.lastCapture) + '</b><span>Última</span></div>' +
     '</div></div>' +
-    '<div class="card"><table>' +
-      '<tr><th>Video</th><th>Nota</th><th>Veces</th><th>Vistas</th></tr>' +
-      m.byClip.map(c =>
-        // El titulo del VOD debajo del clip: sin el, dos 'clip-01' de VODs
-        // distintos se leen como el mismo video.
-        '<tr><td>' + esc(c.clipId) +
-          (c.fuente ? '<br><span class="sub">' + esc(String(c.fuente).slice(0, 30)) + '</span>' : '') +
-        '</td>' +
-        '<td class="score' + (c.score >= 60 ? ' alto' : '') + '">' + c.score + '</td>' +
-        '<td>' + c.posts + '</td><td>' + c.views.toLocaleString('es') + '</td></tr>'
-      ).join('') +
-    '</table></div>';
+    tablaResultados(m);
 }
+
+/** Esta semana contra la anterior (Fase 7). */
+function resumenSemanal(s) {
+  if (!s) return '';
+  const cifra = (clave, nombre) => {
+    const a = s.actual[clave];
+    const b = s.anterior[clave];
+    const cambio = b > 0 ? Math.round(((a - b) / b) * 100) : null;
+    return '<div><b>' + a.toLocaleString('es') + '</b><span>' + nombre +
+      (cambio === null ? '' : ' · <span class="' + (cambio >= 0 ? 'sube' : 'baja') + '">' +
+        (cambio >= 0 ? '+' : '') + cambio + ' %</span>') + '</span></div>';
+  };
+  return '<div class="card"><div class="body" style="padding-bottom:0">' +
+      '<p class="ante">Esta semana</p>' +
+      '<p class="reason" style="margin:0">' + plural(s.actual.posts, 'clip publicado', 'clips publicados') +
+        ' en los últimos 7 días' + (s.anterior.posts > 0 ? ', comparado con la semana anterior' : '') + '.</p>' +
+    '</div>' +
+    '<div class="stats">' + cifra('views', 'Vistas') + cifra('likes', 'Me gusta') + cifra('comments', 'Comentarios') + '</div>' +
+  '</div>';
+}
+
+/**
+ * La tabla, por clip o por cuenta, ordenable por cualquier columna (Fase 7).
+ * El orden se recuerda en state mientras dure la sesion.
+ */
+function tablaResultados(m) {
+  const vista = state.metricasVista || 'clip';
+  const orden = state.metricasOrden || { col: 'views', dir: -1 };
+  const filas = (vista === 'cuenta' ? (m.byAccount || []) : m.byClip).slice();
+  filas.sort((a, b) => {
+    const x = a[orden.col];
+    const y = b[orden.col];
+    const c = typeof x === 'string' ? String(x).localeCompare(String(y), 'es') : (x ?? 0) - (y ?? 0);
+    return c * orden.dir;
+  });
+  const col = (clave, texto) =>
+    '<th><button class="orden' + (orden.col === clave ? ' activo' : '') + '" data-morden="' + clave + '"' +
+      ' aria-sort="' + (orden.col === clave ? (orden.dir < 0 ? 'descending' : 'ascending') : 'none') + '">' +
+      texto + (orden.col === clave ? (orden.dir < 0 ? ' ↓' : ' ↑') : '') + '</button></th>';
+  const num = n => '<td class="dato">' + (n ?? 0).toLocaleString('es') + '</td>';
+  return '<div class="card">' +
+    '<div class="body" style="padding-bottom:0"><div class="segmento" role="tablist" aria-label="Ver resultados">' +
+      '<button role="tab" data-mvista="clip" aria-selected="' + (vista === 'clip') + '">Por clip</button>' +
+      '<button role="tab" data-mvista="cuenta" aria-selected="' + (vista === 'cuenta') + '">Por cuenta</button>' +
+    '</div></div>' +
+    '<div class="tabla-desliza"><table>' +
+      '<tr>' +
+        (vista === 'cuenta' ? col('accountId', 'Cuenta') : col('clipId', 'Clip') + col('score', 'Nota')) +
+        col('posts', 'Veces') + col('views', 'Vistas') + col('likes', 'Me gusta') + col('comments', 'Comentarios') +
+      '</tr>' +
+      filas.map(c =>
+        '<tr>' +
+          (vista === 'cuenta'
+            ? '<td>' + esc(c.alias || c.accountId) + (c.alias ? '<br><span class="sub">' + esc(c.accountId) + '</span>' : '') + '</td>'
+            // El titulo del video debajo del clip: sin el, dos 'clip-01' de
+            // videos distintos se leen como el mismo.
+            : '<td>' + esc(c.clipId) +
+                (c.fuente ? '<br><span class="sub">' + esc(String(c.fuente).slice(0, 30)) + '</span>' : '') + '</td>' +
+              '<td class="score' + (c.score >= 60 ? ' alto' : '') + '">' + c.score + '</td>') +
+          num(c.posts) + num(c.views) + num(c.likes) + num(c.comments) +
+        '</tr>'
+      ).join('') +
+    '</table></div></div>';
+}
+
+document.addEventListener('click', e => {
+  const v = e.target.closest('[data-mvista]');
+  if (v) { state.metricasVista = v.dataset.mvista; render(); return; }
+  const o = e.target.closest('[data-morden]');
+  if (o) {
+    const actual = state.metricasOrden || { col: 'views', dir: -1 };
+    const col = o.dataset.morden;
+    // Texto de menos a mas; cifras de mas a menos, que es lo que se busca.
+    const texto = col === 'clipId' || col === 'accountId';
+    state.metricasOrden = actual.col === col ? { col, dir: -actual.dir } : { col, dir: texto ? 1 : -1 };
+    render();
+  }
+});
 
 // --- Pintado --------------------------------------------------------------
 

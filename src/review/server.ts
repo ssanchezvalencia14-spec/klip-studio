@@ -387,7 +387,7 @@ async function buildMetrics(store: Store): Promise<Record<string, unknown>> {
   const [allPosts, snapshots] = await Promise.all([store.posts.all(), store.metrics.all()])
 
   if (allPosts.length === 0) {
-    return { published: 0, snapshots: 0, byClip: [], lastCapture: null }
+    return { published: 0, snapshots: 0, byClip: [], byAccount: [], semana: null, lastCapture: null }
   }
 
   // Ultima lectura de cada publicacion: las anteriores son historia y para el
@@ -413,10 +413,19 @@ async function buildMetrics(store: Store): Promise<Record<string, unknown>> {
    */
   const titulos = new Map((await store.sources.all()).map((f) => [f.sourceId, f.title]))
 
-  const byClip = new Map<
-    string,
-    { clipId: string; fuente: string; score: number; posts: number; views: number }
-  >()
+  // Fase 7: likes y comentarios ademas de vistas, y la misma tabla por cuenta.
+  type Cifras = { posts: number; views: number; likes: number; comments: number }
+  const sumar = (row: Cifras, postId: string): void => {
+    const s = latest.get(postId)
+    row.posts += 1
+    row.views += s?.views ?? 0
+    row.likes += s?.likes ?? 0
+    row.comments += s?.comments ?? 0
+  }
+
+  const byClip = new Map<string, { clipId: string; fuente: string; score: number } & Cifras>()
+  const alias = new Map((await store.accounts.all()).map((a) => [a.id, a.alias ?? '']))
+  const byAccount = new Map<string, { accountId: string; alias: string } & Cifras>()
   for (const post of allPosts) {
     const key = `${post.sourceId}/${post.clipId}`
     const row = byClip.get(key) ?? {
@@ -425,10 +434,38 @@ async function buildMetrics(store: Store): Promise<Record<string, unknown>> {
       score: notas.get(key) ?? 0,
       posts: 0,
       views: 0,
+      likes: 0,
+      comments: 0,
     }
-    row.posts += 1
-    row.views += latest.get(post.id)?.views ?? 0
+    sumar(row, post.id)
     byClip.set(key, row)
+
+    const cuenta = byAccount.get(post.accountId) ?? {
+      accountId: post.accountId,
+      alias: alias.get(post.accountId) ?? '',
+      posts: 0,
+      views: 0,
+      likes: 0,
+      comments: 0,
+    }
+    sumar(cuenta, post.id)
+    byAccount.set(post.accountId, cuenta)
+  }
+
+  /*
+   * Resumen semanal: lo publicado en los ultimos 7 dias contra los 7 de
+   * antes, cada publicacion con su ultima lectura. Compara semanas de
+   * publicacion, no de lectura: es lo que dice si los clips de esta semana
+   * funcionan mejor que los de la anterior.
+   */
+  const ahora = Date.now()
+  const semana = (desde: number, hasta: number): Cifras => {
+    const row = { posts: 0, views: 0, likes: 0, comments: 0 }
+    for (const p of allPosts) {
+      const t = new Date(p.publishedAt).getTime()
+      if (t >= ahora - desde * 86_400_000 && t < ahora - hasta * 86_400_000) sumar(row, p.id)
+    }
+    return row
   }
 
   const captures = snapshots.map((s) => s.capturedAt).sort()
@@ -438,6 +475,8 @@ async function buildMetrics(store: Store): Promise<Record<string, unknown>> {
     snapshots: snapshots.length,
     lastCapture: captures.at(-1) ?? null,
     byClip: [...byClip.values()].sort((a, b) => b.views - a.views),
+    byAccount: [...byAccount.values()].sort((a, b) => b.views - a.views),
+    semana: { actual: semana(7, 0), anterior: semana(14, 7) },
   }
 }
 

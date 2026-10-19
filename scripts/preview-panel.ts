@@ -91,6 +91,16 @@ await pg.exec(`
            ('${OWNER}', 'acc-05', 'Cuenta 5', '{}', '22222222-2222-2222-2222-222222222222',
             'Zoti clips', null, null, null, null, '{tiktok,youtube}');
 
+  -- Fase 7: publicaciones medidas, para Resultados (esta semana y la anterior).
+  insert into posts (id, owner_id, queue_item_id, source_id, clip_id, account_id, external_id, provider, mode, published_at)
+    values ('p1', '${OWNER}', 'qp1', 'vod-uno', 'clip-01', 'acc-03', 'x1', 'upload-post', 'direct', now() - interval '2 days'),
+           ('p2', '${OWNER}', 'qp2', 'vod-uno', 'clip-02', 'acc-04', 'x2', 'upload-post', 'direct', now() - interval '3 days'),
+           ('p3', '${OWNER}', 'qp3', 'vod-uno', 'clip-01', 'acc-05', 'x3', 'upload-post', 'direct', now() - interval '9 days');
+  insert into metrics (id, owner_id, post_id, external_id, account_id, clip_id, captured_at, views, likes, comments)
+    values ('m1', '${OWNER}', 'p1', 'x1', 'acc-03', 'clip-01', now(), 12400, 830, 41),
+           ('m2', '${OWNER}', 'p2', 'x2', 'acc-04', 'clip-02', now(), 3100, 120, 9),
+           ('m3', '${OWNER}', 'p3', 'x3', 'acc-05', 'clip-01', now(), 9800, 610, 30);
+
   insert into queue (id, owner_id, source_id, clip_id, account_id, variant_path,
                      checksum, scheduled_at, status)
     values ('q1', '${OWNER}', 'vod-uno', 'clip-04', 'acc-01', 'v1.mp4', 'aaa',

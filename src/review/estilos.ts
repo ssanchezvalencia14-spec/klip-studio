@@ -2585,4 +2585,12 @@ export const CSS = `  :root {
   .editor-cuenta .plats legend { padding: 0; margin-bottom: var(--s2); font-size: var(--t-meta); color: var(--dim); }
   .opcion-plat { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
   .lista-alertas { list-style: none; padding: 0; margin: var(--s2) 0 0; display: grid; gap: var(--s2); }
+  /* Resultados ordenables y resumen semanal (Fase 7). */
+  .tabla-desliza { overflow-x: auto; }
+  th button.orden { all: unset; cursor: pointer; font: inherit; color: inherit; }
+  th button.orden.activo { color: var(--text); }
+  th button.orden:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  td.dato { font-variant-numeric: tabular-nums; }
+  .sube { color: var(--ok-texto); }
+  .baja { color: var(--error-texto); }
 `

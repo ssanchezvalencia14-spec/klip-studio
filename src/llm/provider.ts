@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { optionalEnv } from '../lib/env.js'
 import type { Transcript } from '../types.js'
 import { llamarClaude } from './claude-cli.js'
@@ -41,10 +44,27 @@ export function nombreProveedor(preferido?: string): NombreProveedor {
   return 'claude-cli'
 }
 
+/**
+ * Donde esta Claude Code si no se dice en CLAUDE_CLI_PATH.
+ *
+ * En Windows, npm deja claude.cmd/claude.ps1 en el PATH, y esos no se pueden
+ * lanzar sin shell (se lanza sin shell a proposito: el prompt no pasa por
+ * ningun interprete). El ejecutable de verdad esta dentro del paquete, o en
+ * ~/.local/bin con el instalador nativo. Fuera de Windows, 'claude' del PATH.
+ */
+export function rutaClaudePorDefecto(): string {
+  if (process.platform !== 'win32') return 'claude'
+  const candidatos = [
+    process.env.APPDATA ? join(process.env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe') : '',
+    join(homedir(), '.local', 'bin', 'claude.exe'),
+  ]
+  return candidatos.find((c) => c !== '' && existsSync(c)) ?? 'claude'
+}
+
 export function configuracionCli(): { ruta: string; modelo: string; timeoutMs: number } {
   const timeout = Number(optionalEnv('LLM_TIMEOUT_MS') ?? '180000')
   return {
-    ruta: optionalEnv('CLAUDE_CLI_PATH') ?? 'claude',
+    ruta: optionalEnv('CLAUDE_CLI_PATH') ?? rutaClaudePorDefecto(),
     modelo: optionalEnv('LLM_MODEL') ?? 'sonnet',
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 180_000,
   }

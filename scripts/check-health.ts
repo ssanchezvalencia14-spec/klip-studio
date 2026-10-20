@@ -231,16 +231,21 @@ async function uploadPost(): Promise<Resultado> {
     return { pieza: 'Publicación (upload-post)', estado: 'sin configurar', detalle: 'falta UPLOAD_POST_API_KEY', obligatoria: true }
   }
   /*
-   * El historial con una sola fila: es una lectura, no publica nada, y es el
-   * mismo endpoint que ya usa la recogida de metricas.
+   * /uploadposts/me: valida la clave y dice el plan. Es una lectura, no publica
+   * nada. (Antes se pedia el historial con limit=1, y la API empezo a
+   * rechazar ese valor con 'Invalid limit': salia FALLO con la clave buena.)
    */
   try {
     const r = await conTiempo(
-      fetch('https://api.upload-post.com/api/uploadposts/history?page=1&limit=1', {
+      fetch('https://api.upload-post.com/api/uploadposts/me', {
         headers: { Authorization: `Apikey ${clave}` },
       }),
     )
-    if (r.ok) return { pieza: 'Publicación (upload-post)', estado: 'ok', detalle: 'la clave autentica', obligatoria: true }
+    if (r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { plan?: unknown }
+      const plan = typeof j.plan === 'string' ? `, plan ${j.plan}` : ''
+      return { pieza: 'Publicación (upload-post)', estado: 'ok', detalle: `la clave autentica${plan}`, obligatoria: true }
+    }
     const detalle = r.status === 401 || r.status === 403 ? `la clave no vale (${r.status})` : `respondió HTTP ${r.status}`
     return { pieza: 'Publicación (upload-post)', estado: 'fallo', detalle, obligatoria: true }
   } catch (e) {

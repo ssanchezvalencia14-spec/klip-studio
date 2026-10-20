@@ -47,7 +47,14 @@ Lista para marcar antes de dejar KLIP studio funcionando solo. Cada punto dice c
 
 ## Tareas pendientes
 
-Lo que no se pudo cerrar en este PC (sin ffmpeg, sin sesión de Claude, sin `.env` ni base) y hay que probar en el procesador de verdad:
+Estado del PC de desarrollo al cerrar la Fase 8 (2026-10-19): ffmpeg 9.0.2 (gyan.dev, con whisper), yt-dlp 2026.08.19 y Claude Code 2.1.304 instalados; `.env` creado con las rutas y **sin claves**. `check-health` da OK en yt-dlp y pide, por este orden:
+
+1. **Driver de NVIDIA 610 o más nuevo** (hay 591.74): sin él, NVENC no codifica y no se arma ningún clip.
+2. **`claude` › `/login`** en este PC.
+3. **`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y `UPLOAD_POST_API_KEY`** en `.env`.
+4. **El modelo de whisper** `ggml-large-v3-turbo.bin` (~1,6 GB, huggingface.co/ggerganov/whisper.cpp) en `models/`.
+
+Con eso, `npm run check-health` debería salir en verde. Después, lo que hay que probar con un video real:
 
 | Tarea | Por qué está pendiente | Cómo cerrarla |
 |---|---|---|

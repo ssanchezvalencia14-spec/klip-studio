@@ -1597,6 +1597,49 @@ function agruparFallos(jobs) {
   return [...grupos.values()];
 }
 
+/**
+ * Un fallo en palabras de persona (Fase 8, regla 6).
+ *
+ * El historial guarda el error tal cual (salida de yt-dlp, ffmpeg, la API), y
+ * eso no se enseña a la vista: va plegado en "Ver detalles". Aqui se traducen
+ * los fallos conocidos a que paso y que hacer. Un texto que ya es una frase
+ * en castellano, sin restos tecnicos, se deja como esta.
+ */
+function fraseFallo(texto) {
+  const t = String(texto || '');
+  if (t === '') return 'Falló sin dar motivo. Mira el registro del procesador.';
+  if (/HTTP Error 403|Forbidden|Sign in to confirm|not a bot/i.test(t)) {
+    return 'YouTube bloqueó la descarga. Sube el MP4 directamente o activa las cookies del navegador en Sistema.';
+  }
+  if (/HTTP Error 404|Video unavailable|Private video|has been removed/i.test(t)) {
+    return 'Ese video ya no está disponible en YouTube (borrado o privado).';
+  }
+  if (/Not logged in|\\/login|sin sesi/i.test(t)) {
+    return 'La IA no tiene la sesión iniciada en el procesador: abre Claude Code allí y escribe /login.';
+  }
+  if (/credit balance|x-api-key|invalid_api_key|authentication_error|401/i.test(t)) {
+    return 'La IA rechazó la clave o se quedó sin saldo. Revisa la configuración de la IA.';
+  }
+  if (/usage limit|rate.?limit|429|l[ií]mite/i.test(t)) {
+    return 'La IA llegó a su límite de uso. Se reintenta sola cuando vuelva.';
+  }
+  if (/nvenc|driver/i.test(t)) {
+    return 'La tarjeta gráfica no pudo codificar el clip. Actualiza el driver de NVIDIA del procesador.';
+  }
+  if (/ENOENT|no est[aá] instalado|not recognized|no se reconoce/i.test(t)) {
+    return 'Falta un programa en el procesador. Ejecuta npm run check-health allí para ver cuál.';
+  }
+  if (/ETIMEDOUT|timed? ?out|tard[oó] demasiado/i.test(t)) {
+    return 'Tardó demasiado y se cortó. Vuelve a intentarlo.';
+  }
+  if (/ECONN|fetch failed|network|socket hang up/i.test(t)) {
+    return 'Se cortó la conexión a mitad. Vuelve a intentarlo.';
+  }
+  if (/ffmpeg/i.test(t)) return 'Falló ffmpeg al procesar el video. Los detalles dicen en qué punto.';
+  const tecnico = /stderr|stdout|\\bat [\\w.<>]+ \\(|Error:|ERROR|Exception|errno|exit code|c[oó]digo \\d+/.test(t);
+  return tecnico ? 'Falló. El detalle técnico está en "Ver detalles".' : t;
+}
+
 function pintarGrupoFallo(g) {
   const j = g.ultimo;
   const abierto = state.openLog === j.id;
@@ -2511,7 +2554,11 @@ function vistaRegistro() {
           '<span class="badge' + (run.status === 'error' ? ' bad' : '') + '">' + fecha(run.startedAt) + '</span>' +
         '</div>' +
         (run.status === 'error'
-          ? '<p class="reason" style="margin:var(--s3) 0 0;color:var(--no)">' + esc(run.error || 'fallo') + '</p>'
+          ? '<p class="reason" style="margin:var(--s3) 0 0;color:var(--no)">' + esc(fraseFallo(run.error)) + '</p>' +
+            (run.error && fraseFallo(run.error) !== run.error
+              ? '<details class="nota" style="margin-top:var(--s2)"><summary>Ver detalles</summary>' +
+                  '<pre class="log-crudo">' + esc(run.error) + '</pre></details>'
+              : '')
           : '<div style="margin-top:var(--s3);font-size:var(--t-meta);line-height:1.7">' +
               (Object.keys(run.input).length
                 ? '<div><span style="color:var(--faint)">uso</span>  ' + esc(pares(run.input)) + '</div>'

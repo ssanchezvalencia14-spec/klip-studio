@@ -2593,4 +2593,6 @@ export const CSS = `  :root {
   td.dato { font-variant-numeric: tabular-nums; }
   .sube { color: var(--ok-texto); }
   .baja { color: var(--error-texto); }
+  /* El error tecnico, plegado en Ver detalles (Fase 8). */
+  .log-crudo { white-space: pre-wrap; word-break: break-word; font-family: var(--fuente-dato); font-size: var(--t-meta); color: var(--dim); margin: var(--s2) 0 0; }
 `

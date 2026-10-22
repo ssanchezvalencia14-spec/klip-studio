@@ -150,6 +150,16 @@ function jobParaPanel<T extends { args: string[] } | null | undefined>(job: T): 
   return { ...job, args: job.args.map((a) => limpiarRutas(a)) }
 }
 
+/** Fase 8: limpiarRutas en cada texto de un objeto (historial, detalles). */
+function limpiarProfundo<T>(v: T): T {
+  if (typeof v === 'string') return limpiarRutas(v) as T
+  if (Array.isArray(v)) return v.map((x) => limpiarProfundo(x)) as T
+  if (v !== null && typeof v === 'object' && !(v instanceof Date)) {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, limpiarProfundo(x)])) as T
+  }
+  return v
+}
+
 /** Fase 8: la huella del script del panel, para la politica de contenido. */
 const HUELLA_PANEL = huellaScript(SCRIPT_PANEL)
 const limitador = crearLimitador()
@@ -1720,7 +1730,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
 
   if (path === '/api/runs' && req.method === 'GET') {
     const [rows, totals] = await Promise.all([runs.recientes(60), runs.resumen()])
-    sendJson(res, 200, { runs: rows, totals })
+    // Fase 8: el historial guarda errores de antes de la limpieza de rutas (con
+    // la carpeta del usuario de Windows del PC que los produjo). Se limpian al
+    // salir, sean viejos o nuevos.
+    sendJson(res, 200, { runs: rows.map((r) => limpiarProfundo(r)), totals })
     return
   }
 
@@ -2648,7 +2661,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     sendJson(res, 200, {
       active: enMarcha(jobs)?.id ?? null,
       jobs: jobs.map(({ log: texto, ...rest }) => ({
-        ...jobParaPanel(rest),
+        ...limpiarProfundo(jobParaPanel(rest)),
         lineCount: texto === '' ? 0 : texto.split('\n').length,
       })),
     })
@@ -2727,7 +2740,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Contexto):
     }
     // El panel espera un array de lineas. En la base el registro es un solo
     // texto porque asi cabe en una columna y se escribe de una vez.
-    sendJson(res, 200, { ...job, lines: job.log === '' ? [] : job.log.split('\n') })
+    // Ver detalles enseña el registro entero, pero sin rutas ni usuario de
+    // Windows: hay tareas guardadas antes de que la salida se limpiara (Fase 8).
+    const { log: registro, ...resto } = job
+    sendJson(res, 200, limpiarProfundo({ ...jobParaPanel(resto), lines: registro === '' ? [] : registro.split('\n') }))
     return
   }
 

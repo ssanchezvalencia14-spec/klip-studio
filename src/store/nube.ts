@@ -81,7 +81,8 @@ export function crearNube(): Nube | null {
         /*
          * Un cubo creado antes de la Fase 5 solo admite MP4, y el fotograma de
          * la vista previa es JPEG. Se actualiza; si falla, se sigue igual: sin
-         * fotograma la vista previa enseña el video.
+         * fotograma la vista previa enseña el video. Fase 8: tambien los
+         * respaldos de la base (.json.gz).
          */
         await fetch(`${base}/bucket/${CUBO}`, {
           method: 'PUT',
@@ -91,7 +92,7 @@ export function crearNube(): Nube | null {
             name: CUBO,
             public: false,
             file_size_limit: 25 * 1024 * 1024,
-            allowed_mime_types: ['video/mp4', 'image/jpeg'],
+            allowed_mime_types: ['video/mp4', 'image/jpeg', 'application/gzip'],
           }),
         }).catch(() => undefined)
         return 'ya estaba'
@@ -125,7 +126,7 @@ export function crearNube(): Nube | null {
           public: false,
           file_size_limit: 25 * 1024 * 1024,
           // JPEG para el fotograma limpio de la vista previa (Fase 5).
-          allowed_mime_types: ['video/mp4', 'image/jpeg'],
+          allowed_mime_types: ['video/mp4', 'image/jpeg', 'application/gzip'],
         }),
       })
       if (!res.ok) await fallo(res, 'Crear el cubo')

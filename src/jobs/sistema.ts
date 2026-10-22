@@ -199,6 +199,8 @@ export function createSistema(db: Db, ownerId: string) {
       const nube = crearNube()
       if (nube !== null) {
         try {
+          // Un cubo creado antes de la Fase 8 no admite .gz: se pone al dia antes.
+          await nube.asegurarCubo()
           await nube.subir(`respaldos/${r.nombre}`, r.fichero, 'application/gzip')
           enNube = true
         } catch (e) {

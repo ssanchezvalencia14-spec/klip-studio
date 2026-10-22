@@ -2953,8 +2953,15 @@ export function startReviewServer({ port, db, ownerId }: ReviewServerOptions): v
   // Subir un video dispara por si solo la busqueda de momentos y el render.
   // Cada paso encadenado lleva los ajustes guardados, igual que si se pulsara
   // el boton en el panel (Fase 5: antes iban sin ellos).
+  //
+  // SOLO buscar momentos y armar clips dependen de los ajustes. El resto
+  // (subir, momentos, schedule) usa sus argumentos de siempre: buildJob para
+  // 'schedule' es el boton manual "Planificar la cola", sin video, y encadenado
+  // fallaba con "Uso: npm run schedule -- <sourceId>" (visto con un video real).
   arrancarCadena(ctx.cola, () => avisarCambio('trabajos'), async (kind, sourceId) =>
-    buildJob(kind, { sourceId }, new Set([sourceId]), await loadClipSettings(db, ownerId)).args,
+    kind === 'select' || kind === 'render'
+      ? buildJob(kind, { sourceId }, new Set([sourceId]), await loadClipSettings(db, ownerId)).args
+      : null,
   )
   vigilarTareas(ctx.cola)
   // Alertas por Telegram o correo: el panel vigila, porque si el que se cae es

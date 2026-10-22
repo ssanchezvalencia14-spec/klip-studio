@@ -45,6 +45,18 @@ Lista para marcar antes de dejar KLIP studio funcionando solo. Cada punto dice c
 
 ---
 
+## Prueba real (2026-10-22)
+
+Con la base real del equipo (respaldo previo y migraciones 019–025 aplicadas) y el video de YouTube `kxBQ844hxRw` (5:56):
+
+- `check-health` en verde: base, procesador, ffmpeg, yt-dlp, IA (Claude Code con la suscripción) y upload-post.
+- Flujo completo: añadir por la API del panel → descargar y transcribir → buscar momentos (2) → armar clips → subir a la nube → revisar en el panel → aprobar los 2 → copias por cuenta → agenda (4 salidas en acc-01 y acc-02). Las salidas se programaron para el día siguiente y **se borraron de la cola después de verlas en la Agenda**: no se publicó nada.
+- **Lo procesó el PC del equipo** (otro trabajador conectado a la misma base), con su versión del código y Ollama. El encadenado, la revisión, la aprobación y el reparto automático sí fueron los del código nuevo.
+
+Fallos encontrados y arreglados por la prueba real: el chequeo de upload-post (`limit=1` rechazado), yt-dlp por `YT_DLP_PATH`, NVENC que daba verde con un driver viejo, Claude Code no encontrado en Windows, el respaldo en la nube (`.gz` no admitido), los enlaces `https://` destrozados por el limpiador de rutas y el reparto encadenado sin el video.
+
+**Limitación: un solo procesador.** Cada paso deja sus ficheros en el disco del PC que lo hizo. Con dos procesadores contra la misma base, uno puede coger un paso cuyos ficheros están en el otro y fallar (pasó con las copias y el reparto; el reintento lo recogió el bueno). Mientras no se compartan los ficheros, que haya un único procesador encendido.
+
 ## Tareas pendientes
 
 Estado del PC de desarrollo al cerrar la Fase 8 (2026-10-19): ffmpeg 9.0.2 (gyan.dev, con whisper), yt-dlp 2026.08.19 y Claude Code 2.1.304 instalados; `.env` creado con las rutas y **sin claves**. `check-health` da OK en yt-dlp y pide, por este orden:

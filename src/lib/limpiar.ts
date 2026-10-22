@@ -10,12 +10,15 @@
  *   /home/ana/klip/work/vod/audio.wav               ->  …/work/vod/audio.wav
  */
 export function limpiarRutas(texto: string): string {
+  // La letra de unidad no puede ir pegada a otra letra ni seguida de una
+  // segunda barra: si no, la "s:" de https:// se tomaba por una unidad y los
+  // enlaces salian destrozados en el panel (http…\video).
   return texto
     // Windows: unidad + carpeta de usuario. Se conserva desde la carpeta del
     // proyecto (work, out, models) si aparece, que es lo util para entenderlo.
-    .replace(/[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/][^\\/\s"']+(?:[\\/][^\s"']*)?/gi, (m) => recortar(m, '\\'))
+    .replace(/(?<![A-Za-z0-9])[A-Za-z]:[\\/](?![\\/])(?:Users|Documents and Settings)[\\/][^\\/\s"']+(?:[\\/][^\s"']*)?/gi, (m) => recortar(m, '\\'))
     // Cualquier otra ruta absoluta de Windows.
-    .replace(/[A-Za-z]:[\\/][^\s"']+/g, (m) => recortar(m, '\\'))
+    .replace(/(?<![A-Za-z0-9])[A-Za-z]:[\\/](?![\\/])[^\s"']+/g, (m) => recortar(m, '\\'))
     // Unix: carpetas de usuario.
     .replace(/\/(?:home|Users)\/[^/\s"']+(?:\/[^\s"']*)?/g, (m) => recortar(m, '/'))
     // Claves que se cuelan en un mensaje de error.

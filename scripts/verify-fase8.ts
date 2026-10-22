@@ -154,6 +154,8 @@ check('El procesador hace uno al día', readFileSync(join(ROOT, 'src', 'jobs', '
 // --- 6. Nada tecnico a la vista ---------------------------------------------------------------
 
 check('Errores: sin rutas de usuario ni claves', limpiarRutas('No existe C:\\Users\\ana\\Desktop\\klip\\work\\v\\x.mp4 (Bearer abcdefghijk123)') === 'No existe …\\work\\v\\x.mp4 (Bearer ***)')
+// Visto con un video real: la s: de https:// se tomaba por una unidad de Windows.
+check('Errores: los enlaces no se confunden con rutas', limpiarRutas('Descargar https://youtu.be/kxBQ844hxRw') === 'Descargar https://youtu.be/kxBQ844hxRw')
 const server = readFileSync(join(ROOT, 'src', 'review', 'server.ts'), 'utf8')
 check('Errores: toda respuesta de error pasa por el limpiador', server.includes('error: limpiarRutas((body as { error: string }).error)'))
 check('Tareas: el navegador no recibe rutas completas en los argumentos', server.includes("emitir('job', jobParaPanel(resto))") && server.includes('activeJob: jobParaPanel(enMarcha(jobs))') && server.includes('...jobParaPanel(rest)'))

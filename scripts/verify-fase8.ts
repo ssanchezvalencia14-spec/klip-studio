@@ -160,7 +160,7 @@ const server = readFileSync(join(ROOT, 'src', 'review', 'server.ts'), 'utf8')
 // Visto con un video real: el reparto encadenado salia sin el video.
 check('Encadenado: solo buscar momentos y armar clips toman los ajustes; el reparto lleva su video', server.includes("kind === 'select' || kind === 'render'"))
 check('Errores: toda respuesta de error pasa por el limpiador', server.includes('error: limpiarRutas((body as { error: string }).error)'))
-check('Tareas: el navegador no recibe rutas completas en los argumentos', server.includes("emitir('job', jobParaPanel(resto))") && server.includes('activeJob: jobParaPanel(enMarcha(jobs))') && server.includes('...jobParaPanel(rest)'))
+check('Tareas: el navegador no recibe rutas completas en los argumentos', server.includes("emitir('job', jobParaPanel(resto))") && server.includes('activeJob: jobParaPanel(enMarcha(jobs))') && server.includes('...limpiarProfundo(jobParaPanel(rest))') && server.includes('limpiarProfundo({ ...jobParaPanel(resto), lines:') && server.includes('runs: rows.map((r) => limpiarProfundo(r))'))
 check('Subida: la respuesta no lleva la ruta del disco', server.includes('upload: { name: stored.name, bytes: stored.bytes }'))
 
 await pg.close()

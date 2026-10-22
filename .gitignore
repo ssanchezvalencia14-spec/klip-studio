@@ -44,3 +44,7 @@ vendor/
 
 # Respaldos de la base (Fase 8): datos sensibles, nunca en git.
 respaldos/
+
+# Cualquier copia del .env lleva secretos (Fase 8). Solo .env.example se versiona.
+.env.*
+!.env.example

@@ -55,6 +55,8 @@ Con la base real del equipo (respaldo previo y migraciones 019–025 aplicadas) 
 
 Fallos encontrados y arreglados por la prueba real: el chequeo de upload-post (`limit=1` rechazado), yt-dlp por `YT_DLP_PATH`, NVENC que daba verde con un driver viejo, Claude Code no encontrado en Windows, el respaldo en la nube (`.gz` no admitido), los enlaces `https://` destrozados por el limpiador de rutas y el reparto encadenado sin el video.
 
+**Probado también en este PC con el código nuevo (mismo video):** encuadre siguiendo la cara (cara en el 100 % de las muestras de los 3 clips, revisado fotograma a fotograma) y modo música de punta a punta (realce de voz, confianza de la letra 0,92 con subtítulos, cortes por estribillo y energía, render 1080x1920 por NVENC). Pendientes, a falta de que se conecten: Shorts/Reels (ningún perfil de upload-post tiene YouTube ni Instagram) y la alerta real de Telegram (sin bot en el .env).
+
 **Limitación: un solo procesador.** Cada paso deja sus ficheros en el disco del PC que lo hizo. Con dos procesadores contra la misma base, uno puede coger un paso cuyos ficheros están en el otro y fallar (pasó con las copias y el reparto; el reintento lo recogió el bueno). Mientras no se compartan los ficheros, que haya un único procesador encendido.
 
 ## Tareas pendientes

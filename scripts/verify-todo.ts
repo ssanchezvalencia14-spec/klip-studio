@@ -34,8 +34,18 @@ const tsx = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs')
 const filas: { suite: string; estado: 'OK' | 'FALLO' | 'OMITIDA'; detalle: string; ms: number }[] = []
 
 for (const suite of SUITES) {
-  if (CON_BASE_REAL.has(suite) && !hayBase) {
-    filas.push({ suite, estado: 'OMITIDA', detalle: 'necesita DATABASE_URL (base real)', ms: 0 })
+  /*
+   * Las de la base real solo si se piden: verify:proyectos crea filas de prueba
+   * (y las borra) en la base de PRODUCCION, y verify:db compara con los ficheros
+   * de state/ del PC que hizo la migracion, que en otro PC no existen.
+   */
+  if (CON_BASE_REAL.has(suite) && (!hayBase || process.env.PRUEBAS_BASE_REAL !== '1')) {
+    filas.push({
+      suite,
+      estado: 'OMITIDA',
+      detalle: hayBase ? 'usa la base real: PRUEBAS_BASE_REAL=1 para correrla' : 'necesita DATABASE_URL (base real)',
+      ms: 0,
+    })
     continue
   }
   if (suite === 'jobs' && !hayFfmpeg) {
